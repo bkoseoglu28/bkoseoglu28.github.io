@@ -290,26 +290,45 @@ function calculatePhysics(){
   }
 
   let rpm=parseFloat(document.getElementById("rpm").value)||0;
+  let angleDeg=parseFloat(document.getElementById("angle").value)||0;
+
+  // --- Wheel Speed ---
   let wheelRadius=0.05;
   let wheelSpeed=2*Math.PI*wheelRadius*(rpm/60);
   let efficiency= wheelSpeed>0 ? (measured/wheelSpeed)*100 : 0;
 
-  let angleDeg=parseFloat(document.getElementById("angle").value)||0;
+  // --- GERÇEK MAGNUS ---
+  let ballRadius=0.05;      // 10cm çap varsayım
+  let ballMass=0.27;        // kg (tenis topu benzeri)
+  let airDensity=1.2;
+
+  let omega=2*Math.PI*(rpm/60);
+
+  let spinRatio = measured>0 ? (omega*ballRadius)/measured : 0;
+
+  let C_L = 1.6 * spinRatio;
+
+  if(C_L>1.5) C_L=1.5;  // fiziksel limit
+
+  let area = Math.PI * ballRadius * ballRadius;
+
+  let magnusForce = 0.5 * airDensity * area * measured * measured * C_L;
+
+  let magnusAccel = ballMass>0 ? magnusForce/ballMass : 0;
 
   let g=9.81;
-  let magnus=(rpm/60)*0.1;
-  let effectiveG=g-magnus;
+  let effectiveG=g-magnusAccel;
 
   document.getElementById("results").innerHTML=
   `Measured Speed: ${measured.toFixed(2)} m/s<br>
    Wheel Surface Speed: ${wheelSpeed.toFixed(2)} m/s<br>
    Efficiency: ${efficiency.toFixed(1)} %<br><br>
    Launch Angle: ${angleDeg}°<br>
+   Spin Ratio: ${spinRatio.toFixed(2)}<br>
+   Magnus Accel: ${magnusAccel.toFixed(2)} m/s²<br>
    Effective g: ${effectiveG.toFixed(2)} m/s²<br>
-   Magnus: ${magnus.toFixed(2)} m/s²<br>
-   Backspin ${magnus>1?"Var 🌀":"Yok"}`;
+   Backspin ${magnusAccel>0.5?"Var 🌀":"Yok"}`;
 }
-
 function rgbToHsv(r,g,b){
   r/=255; g/=255; b/=255;
   let max=Math.max(r,g,b),min=Math.min(r,g,b);
