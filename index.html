@@ -21,7 +21,6 @@ video, canvas{
 
 input{ width:70px; }
 button{ margin:4px; padding:5px 10px; }
-
 </style>
 </head>
 <body>
@@ -46,7 +45,15 @@ Wheel RPM: <input type="number" id="rpm" step="10" value="3000"><br><br>
   <canvas id="canvas"></canvas>
 </div>
 
-<h3 id="results"></h3>
+<h3 id="results">
+Measured Speed: 0 m/s<br>
+Wheel Surface Speed: 0 m/s<br>
+Efficiency: 0 %<br><br>
+Launch Angle: 0°<br>
+Effective g: 9.81 m/s²<br>
+Magnus: 0 m/s²<br>
+Backspin Yok
+</h3>
 
 <script>
 const video=document.getElementById("video");
@@ -81,7 +88,7 @@ function calibrate(){
 
   canvas.onclick=e=>{
     calibrationPoints.push({x:e.offsetX,y:e.offsetY});
-    drawFrame();
+    ctx.drawImage(video,0,0,canvas.width,canvas.height);
 
     ctx.fillStyle="red";
     ctx.beginPath();
@@ -192,7 +199,7 @@ function calculatePhysics(){
   let wheelSpeed=2*Math.PI*wheelRadius*(rpm/60);
   let efficiency=(measured/wheelSpeed)*100;
 
-  let angle=parseFloat(document.getElementById("angle").value);
+  let angleDeg=parseFloat(document.getElementById("angle").value);
 
   let g=9.81;
   let magnus=(rpm/60)*0.1;
@@ -202,7 +209,7 @@ function calculatePhysics(){
   `Measured Speed: ${measured.toFixed(2)} m/s<br>
    Wheel Surface Speed: ${wheelSpeed.toFixed(2)} m/s<br>
    Efficiency: ${efficiency.toFixed(1)} %<br><br>
-   Launch Angle: ${angle}°<br>
+   Launch Angle: ${angleDeg}°<br>
    Effective g: ${effectiveG.toFixed(2)} m/s²<br>
    Magnus: ${magnus.toFixed(2)} m/s²<br>
    Backspin ${magnus>1?"Var 🌀":"Yok"}`;
@@ -225,10 +232,6 @@ function rgbToHsv(r,g,b){
     h/=6;
   }
   return [h*360,s*255,v*255];
-}
-
-function drawFrame(){
-  ctx.drawImage(video,0,0,canvas.width,canvas.height);
 }
 </script>
 
