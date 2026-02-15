@@ -8,6 +8,7 @@ body { background:#111; color:white; font-family:Arial; text-align:center; }
 canvas { border:2px solid white; margin-top:10px; }
 input { margin:3px; }
 .slider { width:200px; }
+button { margin:5px; padding:8px; }
 </style>
 </head>
 <body>
@@ -26,8 +27,10 @@ input { margin:3px; }
 <input type="number" id="rpm"><br>
 
 <button onclick="captureFrame()">Frame Yakala</button>
-<button onclick="startTracking()">Tracking Başlat</button>
-<button onclick="analyzePhysics()">Backspin Analizi</button>
+<button onclick="enableCalibration()">📏 Kalibrasyon Modu</button>
+<button onclick="enableHSV()">🎯 HSV Renk Seç</button>
+<button onclick="startTracking()">🟢 Tracking Başlat</button>
+<button onclick="analyzePhysics()">🌀 Backspin Analizi</button>
 
 <h3>HSV Ayarları</h3>
 Hue Min <input type="range" id="hMin" min="0" max="360" value="20" class="slider">
@@ -36,8 +39,6 @@ Sat Min <input type="range" id="sMin" min="0" max="100" value="40" class="slider
 Sat Max <input type="range" id="sMax" min="0" max="100" value="100" class="slider"><br>
 Val Min <input type="range" id="vMin" min="0" max="100" value="40" class="slider">
 Val Max <input type="range" id="vMax" min="0" max="100" value="100" class="slider">
-
-<p>🎯 Top rengini seçmek için canvas’a tıkla (HSV otomatik ayarlanır)</p>
 
 <br>
 <video id="video" width="640" controls></video>
@@ -52,6 +53,7 @@ let video = document.getElementById('video');
 let canvas = document.getElementById('canvas');
 let ctx = canvas.getContext('2d');
 
+let mode = "none";
 let calibrationPoints = [];
 let pixelToMeter = 0;
 let trajectory = [];
@@ -65,24 +67,59 @@ function captureFrame(){
     ctx.drawImage(video,0,0,canvas.width,canvas.height);
 }
 
+function enableCalibration(){
+    mode = "calibration";
+    calibrationPoints = [];
+    alert("Kalibrasyon modu aktif. Çubuğun iki ucuna tıkla.");
+}
+
+function enableHSV(){
+    mode = "hsv";
+    alert("Topun üzerine tıkla.");
+}
+
 canvas.addEventListener('click', function(e){
 
     let rect = canvas.getBoundingClientRect();
     let x = e.clientX - rect.left;
     let y = e.clientY - rect.top;
 
-    let frame = ctx.getImageData(x,y,1,1).data;
+    if(mode === "calibration"){
 
-    let hsv = rgbToHsv(frame[0],frame[1],frame[2]);
+        calibrationPoints.push({x,y});
 
-    document.getElementById("hMin").value = hsv.h - 15;
-    document.getElementById("hMax").value = hsv.h + 15;
-    document.getElementById("sMin").value = hsv.s - 20;
-    document.getElementById("sMax").value = 100;
-    document.getElementById("vMin").value = hsv.v - 20;
-    document.getElementById("vMax").value = 100;
+        ctx.fillStyle="red";
+        ctx.beginPath();
+        ctx.arc(x,y,6,0,2*Math.PI);
+        ctx.fill();
 
-    alert("HSV otomatik ayarlandı.");
+        if(calibrationPoints.length === 2){
+
+            let dx = calibrationPoints[1].x - calibrationPoints[0].x;
+            let dy = calibrationPoints[1].y - calibrationPoints[0].y;
+            let pixelLength = Math.sqrt(dx*dx+dy*dy);
+
+            let realLength = parseFloat(document.getElementById("realLength").value);
+            pixelToMeter = realLength / pixelLength;
+
+            alert("Kalibrasyon tamamlandı.");
+            mode = "none";
+        }
+    }
+
+    if(mode === "hsv"){
+
+        let pixel = ctx.getImageData(x,y,1,1).data;
+        let hsv = rgbToHsv(pixel[0],pixel[1],pixel[2]);
+
+        document.getElementById("hMin").value = Math.max(0,hsv.h-15);
+        document.getElementById("hMax").value = Math.min(360,hsv.h+15);
+        document.getElementById("sMin").value = Math.max(0,hsv.s-20);
+        document.getElementById("vMin").value = Math.max(0,hsv.v-20);
+
+        alert("HSV ayarlandı.");
+        mode = "none";
+    }
 });
 
 function startTracking(){
@@ -100,23 +137,21 @@ function startTracking(){
         if(!tracking) return;
 
         ctx.drawImage(video,0,0,canvas.width,canvas.height);
-
         let frame = ctx.getImageData(0,0,canvas.width,canvas.height);
         let data = frame.data;
 
         let totalX=0,totalY=0,count=0;
 
-        let hMin = parseFloat(document.getElementById("hMin").value);
-        let hMax = parseFloat(document.getElementById("hMax").value);
-        let sMin = parseFloat(document.getElementById("sMin").value);
-        let sMax = parseFloat(document.getElementById("sMax").value);
-        let vMin = parseFloat(document.getElementById("vMin").value);
-        let vMax = parseFloat(document.getElementById("vMax").value);
+        let hMin=parseFloat(hMin.value);
+        let hMax=parseFloat(hMax.value);
+        let sMin=parseFloat(sMin.value);
+        let sMax=parseFloat(sMax.value);
+        let vMin=parseFloat(vMin.value);
+        let vMax=parseFloat(vMax.value);
 
         for(let i=0;i<data.length;i+=4){
 
-            let r=data[i], g=data[i+1], b=data[i+2];
-            let hsv = rgbToHsv(r,g,b);
+            let hsv=rgbToHsv(data[i],data[i+1],data[i+2]);
 
             if(hsv.h>=hMin && hsv.h<=hMax &&
                hsv.s>=sMin && hsv.s<=sMax &&
@@ -190,27 +225,18 @@ function analyzePhysics(){
     let g_effective=-2*a;
     let magnus=9.81-g_effective;
 
-    let rpm=parseFloat(document.getElementById("rpm").value);
-    let wheelDiameter=parseFloat(document.getElementById("wheelDiameter").value);
-    let wheelSurfaceSpeed=(Math.PI*wheelDiameter*rpm)/60;
-
     document.getElementById("result").innerHTML=
         "Effective g: "+g_effective.toFixed(2)+" m/s²<br>"+
         "Magnus: "+magnus.toFixed(2)+" m/s²<br>"+
-        (g_effective<9.5?"Backspin Var 🌀":"Backspin Yok")+"<br>"+
-        "Wheel Surface Speed: "+wheelSurfaceSpeed.toFixed(2)+" m/s";
+        (g_effective<9.5?"Backspin Var 🌀":"Backspin Yok");
 }
 
 function rgbToHsv(r,g,b){
-
     r/=255; g/=255; b/=255;
-
     let max=Math.max(r,g,b), min=Math.min(r,g,b);
     let h,s,v=max;
     let d=max-min;
-
     s=max==0?0:d/max;
-
     if(max==min) h=0;
     else{
         switch(max){
@@ -220,12 +246,7 @@ function rgbToHsv(r,g,b){
         }
         h/=6;
     }
-
-    return{
-        h:h*360,
-        s:s*100,
-        v:v*100
-    };
+    return {h:h*360,s:s*100,v:v*100};
 }
 
 </script>
