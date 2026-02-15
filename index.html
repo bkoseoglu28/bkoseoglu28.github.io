@@ -2,33 +2,42 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>FRC Shooter Physics Analyzer</title>
+<title>FRC Shooter Vision Analyzer</title>
 <style>
 body { background:#111; color:white; font-family:Arial; text-align:center; }
 canvas { border:2px solid white; margin-top:10px; }
-input { margin:5px; padding:5px; }
-button { padding:8px 15px; margin:5px; }
+input { margin:3px; }
+.slider { width:200px; }
 </style>
 </head>
 <body>
 
-<h2>FRC Shooter Physics Analyzer</h2>
+<h2>FRC Shooter Vision + Physics</h2>
 
 <input type="file" id="videoInput" accept="video/*"><br>
 
-<label>Referans Çubuk Uzunluğu (m):</label>
+<label>Referans Çubuk (m):</label>
 <input type="number" id="realLength" step="0.01"><br>
 
 <label>Tekerlek Çapı (m):</label>
-<input type="number" id="wheelDiameter" step="0.001"><br>
+<input type="number" id="wheelDiameter" step="0.001">
 
 <label>RPM:</label>
 <input type="number" id="rpm"><br>
 
-<br>
 <button onclick="captureFrame()">Frame Yakala</button>
 <button onclick="startTracking()">Tracking Başlat</button>
 <button onclick="analyzePhysics()">Backspin Analizi</button>
+
+<h3>HSV Ayarları</h3>
+Hue Min <input type="range" id="hMin" min="0" max="360" value="20" class="slider">
+Hue Max <input type="range" id="hMax" min="0" max="360" value="50" class="slider"><br>
+Sat Min <input type="range" id="sMin" min="0" max="100" value="40" class="slider">
+Sat Max <input type="range" id="sMax" min="0" max="100" value="100" class="slider"><br>
+Val Min <input type="range" id="vMin" min="0" max="100" value="40" class="slider">
+Val Max <input type="range" id="vMax" min="0" max="100" value="100" class="slider">
+
+<p>🎯 Top rengini seçmek için canvas’a tıkla (HSV otomatik ayarlanır)</p>
 
 <br>
 <video id="video" width="640" controls></video>
@@ -45,45 +54,35 @@ let ctx = canvas.getContext('2d');
 
 let calibrationPoints = [];
 let pixelToMeter = 0;
-let tracking = false;
 let trajectory = [];
+let tracking = false;
 
 document.getElementById('videoInput').addEventListener('change', function(e){
-    let file = e.target.files[0];
-    video.src = URL.createObjectURL(file);
+    video.src = URL.createObjectURL(e.target.files[0]);
 });
 
 function captureFrame(){
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(video,0,0,canvas.width,canvas.height);
 }
 
 canvas.addEventListener('click', function(e){
-
-    if(calibrationPoints.length >= 2) return;
 
     let rect = canvas.getBoundingClientRect();
     let x = e.clientX - rect.left;
     let y = e.clientY - rect.top;
 
-    calibrationPoints.push({x:x,y:y});
+    let frame = ctx.getImageData(x,y,1,1).data;
 
-    ctx.fillStyle="red";
-    ctx.beginPath();
-    ctx.arc(x,y,6,0,2*Math.PI);
-    ctx.fill();
+    let hsv = rgbToHsv(frame[0],frame[1],frame[2]);
 
-    if(calibrationPoints.length==2){
+    document.getElementById("hMin").value = hsv.h - 15;
+    document.getElementById("hMax").value = hsv.h + 15;
+    document.getElementById("sMin").value = hsv.s - 20;
+    document.getElementById("sMax").value = 100;
+    document.getElementById("vMin").value = hsv.v - 20;
+    document.getElementById("vMax").value = 100;
 
-        let dx = calibrationPoints[1].x - calibrationPoints[0].x;
-        let dy = calibrationPoints[1].y - calibrationPoints[0].y;
-        let pixelLength = Math.sqrt(dx*dx+dy*dy);
-
-        let realLength = parseFloat(document.getElementById("realLength").value);
-
-        pixelToMeter = realLength / pixelLength;
-
-        alert("Kalibrasyon tamamlandı.");
-    }
+    alert("HSV otomatik ayarlandı.");
 });
 
 function startTracking(){
@@ -105,33 +104,38 @@ function startTracking(){
         let frame = ctx.getImageData(0,0,canvas.width,canvas.height);
         let data = frame.data;
 
-        let totalX = 0;
-        let totalY = 0;
-        let count = 0;
+        let totalX=0,totalY=0,count=0;
+
+        let hMin = parseFloat(document.getElementById("hMin").value);
+        let hMax = parseFloat(document.getElementById("hMax").value);
+        let sMin = parseFloat(document.getElementById("sMin").value);
+        let sMax = parseFloat(document.getElementById("sMax").value);
+        let vMin = parseFloat(document.getElementById("vMin").value);
+        let vMax = parseFloat(document.getElementById("vMax").value);
 
         for(let i=0;i<data.length;i+=4){
 
-            let r = data[i];
-            let g = data[i+1];
-            let b = data[i+2];
+            let r=data[i], g=data[i+1], b=data[i+2];
+            let hsv = rgbToHsv(r,g,b);
 
-            // Basit sarı threshold (HSV yerine RGB approx)
-            if(r > 180 && g > 150 && b < 120){
+            if(hsv.h>=hMin && hsv.h<=hMax &&
+               hsv.s>=sMin && hsv.s<=sMax &&
+               hsv.v>=vMin && hsv.v<=vMax){
 
-                let pixelIndex = i/4;
-                let x = pixelIndex % canvas.width;
-                let y = Math.floor(pixelIndex / canvas.width);
+                let idx=i/4;
+                let x=idx%canvas.width;
+                let y=Math.floor(idx/canvas.width);
 
-                totalX += x;
-                totalY += y;
+                totalX+=x;
+                totalY+=y;
                 count++;
             }
         }
 
-        if(count > 100){
+        if(count>200){
 
-            let cx = totalX / count;
-            let cy = totalY / count;
+            let cx=totalX/count;
+            let cy=totalY/count;
 
             ctx.fillStyle="lime";
             ctx.beginPath();
@@ -139,8 +143,8 @@ function startTracking(){
             ctx.fill();
 
             trajectory.push({
-                x: cx * pixelToMeter,
-                y: cy * pixelToMeter,
+                x: cx*pixelToMeter,
+                y: cy*pixelToMeter,
                 t: video.currentTime
             });
         }
@@ -153,61 +157,77 @@ function startTracking(){
 
 function analyzePhysics(){
 
-    if(trajectory.length < 5){
+    if(trajectory.length<5){
         alert("Yeterli veri yok.");
         return;
     }
 
-    let t = [];
-    let y = [];
-
-    let t0 = trajectory[0].t;
+    let t=[],y=[];
+    let t0=trajectory[0].t;
 
     for(let i=0;i<trajectory.length;i++){
-        t.push(trajectory[i].t - t0);
+        t.push(trajectory[i].t-t0);
         y.push(trajectory[i].y);
     }
 
     let sumT=0,sumT2=0,sumT3=0,sumT4=0,sumY=0,sumTY=0,sumT2Y=0;
-    let n = t.length;
+    let n=t.length;
 
     for(let i=0;i<n;i++){
-        let ti = t[i];
-        let yi = y[i];
-        sumT += ti;
-        sumT2 += ti*ti;
-        sumT3 += ti*ti*ti;
-        sumT4 += ti*ti*ti*ti;
-        sumY += yi;
-        sumTY += ti*yi;
-        sumT2Y += ti*ti*yi;
+        let ti=t[i], yi=y[i];
+        sumT+=ti;
+        sumT2+=ti*ti;
+        sumT3+=ti*ti*ti;
+        sumT4+=ti*ti*ti*ti;
+        sumY+=yi;
+        sumTY+=ti*yi;
+        sumT2Y+=ti*ti*yi;
     }
 
-    let denom = (n*sumT2*sumT4 + 2*sumT*sumT2*sumT3 - sumT2*sumT2*sumT2 - n*sumT3*sumT3 - sumT*sumT*sumT4);
+    let denom=(n*sumT2*sumT4+2*sumT*sumT2*sumT3-sumT2*sumT2*sumT2-n*sumT3*sumT3-sumT*sumT*sumT4);
+    let a=(n*sumT2*sumT2Y+sumT*sumT3*sumY+sumT2*sumT*sumTY-sumT2*sumT2*sumY-n*sumT3*sumTY-sumT*sumT*sumT2Y)/denom;
 
-    let a = (n*sumT2*sumT2Y + sumT*sumT3*sumY + sumT2*sumT*sumTY - sumT2*sumT2*sumY - n*sumT3*sumTY - sumT*sumT*sumT2Y) / denom;
+    let g_effective=-2*a;
+    let magnus=9.81-g_effective;
 
-    let g_effective = -2*a;
-    let magnus = 9.81 - g_effective;
+    let rpm=parseFloat(document.getElementById("rpm").value);
+    let wheelDiameter=parseFloat(document.getElementById("wheelDiameter").value);
+    let wheelSurfaceSpeed=(Math.PI*wheelDiameter*rpm)/60;
 
-    let rpm = parseFloat(document.getElementById("rpm").value);
-    let wheelDiameter = parseFloat(document.getElementById("wheelDiameter").value);
-    let wheelSurfaceSpeed = (Math.PI * wheelDiameter * rpm) / 60;
+    document.getElementById("result").innerHTML=
+        "Effective g: "+g_effective.toFixed(2)+" m/s²<br>"+
+        "Magnus: "+magnus.toFixed(2)+" m/s²<br>"+
+        (g_effective<9.5?"Backspin Var 🌀":"Backspin Yok")+"<br>"+
+        "Wheel Surface Speed: "+wheelSurfaceSpeed.toFixed(2)+" m/s";
+}
 
-    let dx = trajectory[trajectory.length-1].x - trajectory[0].x;
-    let dt = trajectory[trajectory.length-1].t - trajectory[0].t;
-    let measuredSpeed = dx / dt;
+function rgbToHsv(r,g,b){
 
-    document.getElementById("result").innerHTML =
-        "Ölçülen Hız: " + measuredSpeed.toFixed(2) + " m/s<br>" +
-        "Tekerlek Yüzey Hızı: " + wheelSurfaceSpeed.toFixed(2) + " m/s<br>" +
-        "Verim: " + ((measuredSpeed/wheelSurfaceSpeed)*100).toFixed(1) + "%<br><br>" +
-        "Effective g: " + g_effective.toFixed(2) + " m/s²<br>" +
-        "Magnus İvmesi: " + magnus.toFixed(2) + " m/s²<br>" +
-        (g_effective < 9.5 ? "Backspin Var 🌀" : "Backspin Yok");
+    r/=255; g/=255; b/=255;
+
+    let max=Math.max(r,g,b), min=Math.min(r,g,b);
+    let h,s,v=max;
+    let d=max-min;
+
+    s=max==0?0:d/max;
+
+    if(max==min) h=0;
+    else{
+        switch(max){
+            case r: h=(g-b)/d+(g<b?6:0); break;
+            case g: h=(b-r)/d+2; break;
+            case b: h=(r-g)/d+4; break;
+        }
+        h/=6;
+    }
+
+    return{
+        h:h*360,
+        s:s*100,
+        v:v*100
+    };
 }
 
 </script>
-
 </body>
 </html>
