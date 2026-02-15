@@ -5,14 +5,12 @@
 <title>Robot Shot Analyzer</title>
 <style>
 body { background:#111; color:white; font-family:Arial; text-align:center; }
-
 .container{
   display:flex;
   justify-content:center;
   gap:20px;
   flex-wrap:wrap;
 }
-
 video, canvas{
   max-width:45vw;
   height:auto;
@@ -55,9 +53,13 @@ let scale=1;
 let tracking=false;
 let lastPos=null;
 let lastTime=null;
-let velocities=[];
-let calibrationPoints=[];
+
 let hsv={hMin:20,hMax:40,sMin:120,vMin:120};
+
+let launchSpeed=0;
+let capturing=false;
+let captureFrames=[];
+let locked=false;
 
 document.getElementById("videoUpload").onchange=e=>{
   video.src=URL.createObjectURL(e.target.files[0]);
@@ -84,32 +86,30 @@ function grabFrame(){
 }
 
 function calibrate(){
-  calibrationPoints=[];
+  let points=[];
   alert("Çubuğun iki ucuna tıkla");
 
   canvas.onclick=e=>{
     const pos=getMousePos(e);
-    calibrationPoints.push(pos);
+    points.push(pos);
 
     ctx.drawImage(video,0,0,canvas.width,canvas.height);
-
     ctx.fillStyle="red";
     ctx.beginPath();
     ctx.arc(pos.x,pos.y,8,0,Math.PI*2);
     ctx.fill();
 
-    if(calibrationPoints.length==2){
-
+    if(points.length==2){
       ctx.strokeStyle="red";
       ctx.lineWidth=4;
       ctx.beginPath();
-      ctx.moveTo(calibrationPoints[0].x,calibrationPoints[0].y);
-      ctx.lineTo(calibrationPoints[1].x,calibrationPoints[1].y);
+      ctx.moveTo(points[0].x,points[0].y);
+      ctx.lineTo(points[1].x,points[1].y);
       ctx.stroke();
 
       let rod=parseFloat(document.getElementById("rodLength").value);
-      let dx=calibrationPoints[1].x-calibrationPoints[0].x;
-      let dy=calibrationPoints[1].y-calibrationPoints[0].y;
+      let dx=points[1].x-points[0].x;
+      let dy=points[1].y-points[0].y;
       let pixelDist=Math.sqrt(dx*dx+dy*dy);
       scale=rod/pixelDist;
 
@@ -120,7 +120,7 @@ function calibrate(){
 }
 
 function toggleHSV(){
-  alert("Topun TAM ortasına tıkla");
+  alert("Topun ortasına tıkla");
   canvas.onclick=e=>{
     const pos=getMousePos(e);
     let data=ctx.getImageData(pos.x,pos.y,1,1).data;
@@ -133,7 +133,7 @@ function toggleHSV(){
     hsv.vMin=120;
 
     canvas.onclick=null;
-    alert("HSV dar mod ayarlandı ✅");
+    alert("HSV ayarlandı ✅");
   };
 }
 
@@ -143,7 +143,10 @@ function toggleTracking(){
   if(tracking){
     lastPos=null;
     lastTime=null;
-    velocities=[];
+    launchSpeed=0;
+    captureFrames=[];
+    capturing=false;
+    locked=false;
     video.play();
     video.requestVideoFrameCallback(processFrame);
   }
@@ -164,117 +167,70 @@ function processFrame(now, metadata){
   let img=ctx.getImageData(0,0,canvas.width,canvas.height);
   let data=img.data;
 
-  let blobs=[];
-  let visited=new Uint8Array(canvas.width*canvas.height);
+  let centerX=canvas.width/2;
+  let centerY=canvas.height/2;
 
-  function index(x,y){ return y*canvas.width+x; }
+  let bestX=null;
+  let bestY=null;
+  let bestDist=999999;
 
-  function isMatch(i){
-    let hsvVal=rgbToHsv(data[i],data[i+1],data[i+2]);
-    return (
-      hueMatch(hsvVal[0]) &&
-      hsvVal[1]>hsv.sMin &&
-      hsvVal[2]>hsv.vMin
-    );
+  for(let y=0;y<canvas.height;y+=2){
+    for(let x=0;x<canvas.width;x+=2){
+
+      let i=(y*canvas.width+x)*4;
+      let hsvVal=rgbToHsv(data[i],data[i+1],data[i+2]);
+
+      if(hueMatch(hsvVal[0]) && hsvVal[1]>hsv.sMin && hsvVal[2]>hsv.vMin){
+
+        let dist=Math.hypot(x-centerX,y-centerY);
+
+        if(dist<bestDist){
+          bestDist=dist;
+          bestX=x;
+          bestY=y;
+        }
+      }
+    }
   }
 
-  let step=2;
+  if(bestX!==null){
 
-  for(let y=0;y<canvas.height;y+=step){
-    for(let x=0;x<canvas.width;x+=step){
+    if(lastPos!==null){
+      let dx=(bestX-lastPos.x)*scale;
+      let dy=(bestY-lastPos.y)*scale;
+      let dt=metadata.mediaTime-lastTime;
 
-      let idx=index(x,y);
-      if(visited[idx]) continue;
+      if(dt>0){
 
-      let pixelIndex=idx*4;
-      if(!isMatch(pixelIndex)) continue;
+        let speed=Math.sqrt(dx*dx+dy*dy)/dt;
 
-      let stack=[[x,y]];
-      let blob=[];
-      visited[idx]=1;
+        if(!locked){
 
-      while(stack.length>0){
-        let [cx,cy]=stack.pop();
-        blob.push([cx,cy]);
+          if(speed>1 && !capturing){
+            capturing=true;
+            captureFrames=[];
+          }
 
-        let neighbors=[
-          [cx+step,cy],[cx-step,cy],
-          [cx,cy+step],[cx,cy-step]
-        ];
+          if(capturing){
+            captureFrames.push(speed);
 
-        for(let [nx,ny] of neighbors){
-          if(nx>=0 && ny>=0 && nx<canvas.width && ny<canvas.height){
-            let nIdx=index(nx,ny);
-            if(!visited[nIdx]){
-              visited[nIdx]=1;
-              let pIndex=nIdx*4;
-              if(isMatch(pIndex)){
-                stack.push([nx,ny]);
-              }
+            if(captureFrames.length>=6){
+              launchSpeed = captureFrames.reduce((a,b)=>a+b)/captureFrames.length;
+              locked=true;
+              capturing=false;
             }
           }
         }
       }
-
-      if(blob.length>150){
-        blobs.push(blob);
-      }
-    }
-  }
-
-  if(blobs.length>0){
-
-    let centerX=canvas.width/2;
-    let centerY=canvas.height/2;
-
-    let bestBlob=null;
-    let bestDist=999999;
-
-    for(let blob of blobs){
-
-      let sumX=0,sumY=0;
-      for(let p of blob){
-        sumX+=p[0];
-        sumY+=p[1];
-      }
-
-      let x=sumX/blob.length;
-      let y=sumY/blob.length;
-
-      let dist=Math.hypot(x-centerX,y-centerY);
-
-      if(dist<bestDist){
-        bestDist=dist;
-        bestBlob={x,y};
-      }
     }
 
-    let x=bestBlob.x;
-    let y=bestBlob.y;
-
-    if(lastPos!==null){
-      let dx=(x-lastPos.x)*scale;
-      let dy=(y-lastPos.y)*scale;
-      let dt=metadata.mediaTime-lastTime;
-
-      if(dt>0){
-        let speed=Math.sqrt(dx*dx+dy*dy)/dt;
-
-        if(speed>0.5 && speed<40){
-          velocities.push(speed);
-          if(velocities.length>10)
-            velocities.shift();
-        }
-      }
-    }
-
-    lastPos={x,y};
+    lastPos={x:bestX,y:bestY};
     lastTime=metadata.mediaTime;
 
     ctx.strokeStyle="lime";
     ctx.lineWidth=3;
     ctx.beginPath();
-    ctx.arc(x,y,14,0,Math.PI*2);
+    ctx.arc(bestX,bestY,14,0,Math.PI*2);
     ctx.stroke();
   }
 
@@ -284,36 +240,25 @@ function processFrame(now, metadata){
 
 function calculatePhysics(){
 
-  let measured=0;
-  if(velocities.length>0){
-    measured=velocities.reduce((a,b)=>a+b)/velocities.length;
-  }
+  let measured=launchSpeed;
 
   let rpm=parseFloat(document.getElementById("rpm").value)||0;
   let angleDeg=parseFloat(document.getElementById("angle").value)||0;
 
-  // --- Wheel Speed ---
   let wheelRadius=0.05;
   let wheelSpeed=2*Math.PI*wheelRadius*(rpm/60);
   let efficiency= wheelSpeed>0 ? (measured/wheelSpeed)*100 : 0;
 
-  // --- GERÇEK MAGNUS ---
-  let ballRadius=0.05;      // 10cm çap varsayım
-  let ballMass=0.27;        // kg (tenis topu benzeri)
+  let ballRadius=0.05;
+  let ballMass=0.27;
   let airDensity=1.2;
 
   let omega=2*Math.PI*(rpm/60);
-
   let spinRatio = measured>0 ? (omega*ballRadius)/measured : 0;
+  let C_L = Math.min(1.6*spinRatio,1.5);
 
-  let C_L = 1.6 * spinRatio;
-
-  if(C_L>1.5) C_L=1.5;  // fiziksel limit
-
-  let area = Math.PI * ballRadius * ballRadius;
-
-  let magnusForce = 0.5 * airDensity * area * measured * measured * C_L;
-
+  let area = Math.PI*ballRadius*ballRadius;
+  let magnusForce = 0.5*airDensity*area*measured*measured*C_L;
   let magnusAccel = ballMass>0 ? magnusForce/ballMass : 0;
 
   let g=9.81;
@@ -329,6 +274,7 @@ function calculatePhysics(){
    Effective g: ${effectiveG.toFixed(2)} m/s²<br>
    Backspin ${magnusAccel>0.5?"Var 🌀":"Yok"}`;
 }
+
 function rgbToHsv(r,g,b){
   r/=255; g/=255; b/=255;
   let max=Math.max(r,g,b),min=Math.min(r,g,b);
@@ -348,5 +294,6 @@ function rgbToHsv(r,g,b){
   return [h*360,s*255,v*255];
 }
 </script>
+
 </body>
 </html>
