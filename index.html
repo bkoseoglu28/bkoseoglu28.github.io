@@ -2,42 +2,42 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Shooter Physics Analyzer</title>
+<title>Shooter Analyzer</title>
 <style>
-body { font-family: Arial; background:#111; color:white; text-align:center; }
-video, canvas { border:2px solid white; margin-top:10px; }
-.controls { margin-top:15px; }
-input { margin:5px; }
+body{background:#111;color:white;font-family:Arial;text-align:center;}
+canvas{border:2px solid white;margin-top:10px;}
+input,button{margin:5px;}
 </style>
 </head>
 <body>
 
-<h2>Shooter Physics Analyzer</h2>
+<h2>Video Shooter Analyzer</h2>
 
-<video id="video" width="640" height="480" autoplay playsinline></video>
+<input type="file" id="videoFile" accept="video/*">
+<br>
+
+<video id="video" width="640" height="480" controls></video>
+<br>
 <canvas id="canvas" width="640" height="480"></canvas>
 
-<div class="controls">
-
 <h3>Calibration</h3>
-Known Distance (meters):
-<input type="number" id="knownDistance" step="0.01">
+Real Distance (m):
+<input type="number" id="realDist" step="0.01">
 Pixel Distance:
-<input type="number" id="pixelDistance" step="1">
-<button onclick="setCalibration()">Set Calibration</button>
+<input type="number" id="pixelDist" step="1">
+<button onclick="setCalibration()">Set</button>
 
-<h3>Shot Parameters</h3>
+<h3>Shot Settings</h3>
 Launch Angle (deg):
 <input type="number" id="launchAngle" value="45" step="0.1">
 
 Wheel RPM:
 <input type="number" id="wheelRPM" value="3000">
 
-Wheel Diameter (meters):
+Wheel Diameter (m):
 <input type="number" id="wheelDiameter" value="0.1" step="0.001">
 
 <br><br>
-
 <button onclick="startTracking()">Start Tracking</button>
 <button onclick="stopTracking()">Stop</button>
 <button onclick="calculatePhysics()">Calculate</button>
@@ -45,59 +45,62 @@ Wheel Diameter (meters):
 <h3>Output</h3>
 <div id="output"></div>
 
-</div>
-
 <script>
 
-const video = document.getElementById("video");
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
+const video=document.getElementById("video");
+const canvas=document.getElementById("canvas");
+const ctx=canvas.getContext("2d");
 
-let pixelToMeter = 0;
-let tracking = false;
-let trajectory = [];
+let pixelToMeter=0;
+let tracking=false;
+let trajectory=[];
 
-navigator.mediaDevices.getUserMedia({ video:true })
-.then(stream => { video.srcObject = stream; });
+// Video yükleme
+document.getElementById("videoFile").addEventListener("change",function(e){
+    const file=e.target.files[0];
+    if(file){
+        video.src=URL.createObjectURL(file);
+    }
+});
 
 function setCalibration(){
-    let real = parseFloat(document.getElementById("knownDistance").value);
-    let pixel = parseFloat(document.getElementById("pixelDistance").value);
-    pixelToMeter = real / pixel;
+    let real=parseFloat(document.getElementById("realDist").value);
+    let pixel=parseFloat(document.getElementById("pixelDist").value);
+    pixelToMeter=real/pixel;
     alert("Calibration set");
 }
 
 function rgbToHsv(r,g,b){
     r/=255; g/=255; b/=255;
-    let max=Math.max(r,g,b), min=Math.min(r,g,b);
-    let h,s,v=max;
-    let d=max-min;
+    let max=Math.max(r,g,b),min=Math.min(r,g,b);
+    let h,s,v=max,d=max-min;
     s=max==0?0:d/max;
     if(max==min) h=0;
     else{
         switch(max){
-            case r: h=(g-b)/d+(g<b?6:0); break;
-            case g: h=(b-r)/d+2; break;
-            case b: h=(r-g)/d+4; break;
+            case r:h=(g-b)/d+(g<b?6:0);break;
+            case g:h=(b-r)/d+2;break;
+            case b:h=(r-g)/d+4;break;
         }
         h/=6;
     }
-    return {h:h*360,s:s,v:v};
+    return{h:h*360,s:s,v:v};
 }
 
 function startTracking(){
 
     if(pixelToMeter===0){
-        alert("Do calibration first");
+        alert("Calibration yap");
         return;
     }
 
     trajectory=[];
     tracking=true;
+    video.play();
 
     function process(){
 
-        if(!tracking) return;
+        if(!tracking || video.paused || video.ended) return;
 
         ctx.drawImage(video,0,0,canvas.width,canvas.height);
         let frame=ctx.getImageData(0,0,canvas.width,canvas.height);
@@ -109,7 +112,6 @@ function startTracking(){
 
             let hsv=rgbToHsv(data[i],data[i+1],data[i+2]);
 
-            // Green detection
             if(hsv.h>70 && hsv.h<160 && hsv.s>0.3 && hsv.v>0.2){
 
                 let idx=i/4;
@@ -133,9 +135,9 @@ function startTracking(){
             ctx.fill();
 
             trajectory.push({
-                x: cx*pixelToMeter,
-                y: cy*pixelToMeter,
-                t: video.currentTime
+                x:cx*pixelToMeter,
+                y:cy*pixelToMeter,
+                t:video.currentTime
             });
         }
 
@@ -147,40 +149,41 @@ function startTracking(){
 
 function stopTracking(){
     tracking=false;
+    video.pause();
 }
 
 function calculatePhysics(){
 
     if(trajectory.length<5){
-        alert("Not enough data");
+        alert("Yeterli veri yok");
         return;
     }
 
     let p1=trajectory[0];
     let p2=trajectory[1];
-    let pLast=trajectory[trajectory.length-1];
-    let pPrev=trajectory[trajectory.length-2];
 
     let dt=p2.t-p1.t;
-    if(dt<=0) return;
+    if(dt<=0)return;
 
-    // Velocity
+    // Doğru eksen düzeltmesi
     let vx=(p2.x-p1.x)/dt;
-    let vy=(p1.y-p2.y)/dt; // invert y-axis
+    let vy=(p1.y-p2.y)/dt;
 
     let speed=Math.sqrt(vx*vx+vy*vy);
 
-    // Acceleration
+    // Son frame ivme
+    let pLast=trajectory[trajectory.length-1];
+    let pPrev=trajectory[trajectory.length-2];
+
     let dt2=pLast.t-pPrev.t;
     let vy2=(pPrev.y-pLast.y)/dt2;
     let ay=(vy2-vy)/dt2;
 
-    // Wheel surface speed from RPM
     let rpm=parseFloat(document.getElementById("wheelRPM").value);
     let diameter=parseFloat(document.getElementById("wheelDiameter").value);
     let radius=diameter/2;
-    let wheelSurfaceSpeed=2*Math.PI*radius*(rpm/60);
 
+    let wheelSurfaceSpeed=2*Math.PI*radius*(rpm/60);
     let efficiency=(speed/wheelSurfaceSpeed)*100;
 
     let g=9.81;
@@ -191,7 +194,7 @@ function calculatePhysics(){
         "Wheel Surface Speed: "+wheelSurfaceSpeed.toFixed(2)+" m/s<br>"+
         "Efficiency: "+efficiency.toFixed(1)+"%<br><br>"+
         "Vertical Acceleration: "+ay.toFixed(2)+" m/s²<br>"+
-        "Magnus Acceleration: "+magnus.toFixed(2)+" m/s²<br>"+
+        "Magnus: "+magnus.toFixed(2)+" m/s²<br>"+
         (magnus>0?"Backspin Var 🌀":"Topspin Var 🔄");
 }
 
