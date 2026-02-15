@@ -18,7 +18,6 @@ video, canvas{
   height:auto;
   border:1px solid white;
 }
-
 input{ width:70px; }
 button{ margin:4px; padding:5px 10px; }
 </style>
@@ -45,15 +44,7 @@ Wheel RPM: <input type="number" id="rpm" step="10" value="3000"><br><br>
   <canvas id="canvas"></canvas>
 </div>
 
-<h3 id="results">
-Measured Speed: 0 m/s<br>
-Wheel Surface Speed: 0 m/s<br>
-Efficiency: 0 %<br><br>
-Launch Angle: 0°<br>
-Effective g: 9.81 m/s²<br>
-Magnus: 0 m/s²<br>
-Backspin Yok
-</h3>
+<h3 id="results"></h3>
 
 <script>
 const video=document.getElementById("video");
@@ -63,10 +54,20 @@ const ctx=canvas.getContext("2d");
 let scale=1;
 let tracking=false;
 let lastPos=null;
-let lastVideoTime=null;
+let lastTime=null;
 let velocities=[];
 let calibrationPoints=[];
 let hsv={hMin:20,hMax:40,sMin:80,vMin:80};
+
+function getMousePos(evt){
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  return {
+    x: (evt.clientX - rect.left) * scaleX,
+    y: (evt.clientY - rect.top) * scaleY
+  };
+}
 
 document.getElementById("videoUpload").onchange=e=>{
   video.src=URL.createObjectURL(e.target.files[0]);
@@ -87,17 +88,20 @@ function calibrate(){
   alert("Çubuğun iki ucuna tıkla");
 
   canvas.onclick=e=>{
-    calibrationPoints.push({x:e.offsetX,y:e.offsetY});
+    const pos=getMousePos(e);
+    calibrationPoints.push(pos);
+
     ctx.drawImage(video,0,0,canvas.width,canvas.height);
 
     ctx.fillStyle="red";
     ctx.beginPath();
-    ctx.arc(e.offsetX,e.offsetY,6,0,Math.PI*2);
+    ctx.arc(pos.x,pos.y,8,0,Math.PI*2);
     ctx.fill();
 
     if(calibrationPoints.length==2){
+
       ctx.strokeStyle="red";
-      ctx.lineWidth=3;
+      ctx.lineWidth=4;
       ctx.beginPath();
       ctx.moveTo(calibrationPoints[0].x,calibrationPoints[0].y);
       ctx.lineTo(calibrationPoints[1].x,calibrationPoints[1].y);
@@ -118,7 +122,8 @@ function calibrate(){
 function toggleHSV(){
   alert("Topa tıkla");
   canvas.onclick=e=>{
-    let data=ctx.getImageData(e.offsetX,e.offsetY,1,1).data;
+    const pos=getMousePos(e);
+    let data=ctx.getImageData(pos.x,pos.y,1,1).data;
     let h=rgbToHsv(data[0],data[1],data[2])[0];
     hsv.hMin=h-10;
     hsv.hMax=h+10;
@@ -131,7 +136,7 @@ function toggleTracking(){
   tracking=!tracking;
   if(tracking){
     lastPos=null;
-    lastVideoTime=null;
+    lastTime=null;
     velocities=[];
     video.play();
     requestAnimationFrame(processFrame);
@@ -167,21 +172,23 @@ function processFrame(){
     if(lastPos!==null){
       let dx=(x-lastPos.x)*scale;
       let dy=(y-lastPos.y)*scale;
-      let dt=video.currentTime-lastVideoTime;
+      let dt=(performance.now()-lastTime)/1000;
 
       if(dt>0){
         let speed=Math.sqrt(dx*dx+dy*dy)/dt;
-        if(speed>0.5) velocities.push(speed);
+        if(speed>0.5){
+          velocities.push(speed);
+        }
       }
     }
 
     lastPos={x,y};
-    lastVideoTime=video.currentTime;
+    lastTime=performance.now();
 
     ctx.strokeStyle="lime";
     ctx.lineWidth=3;
     ctx.beginPath();
-    ctx.arc(x,y,10,0,Math.PI*2);
+    ctx.arc(x,y,12,0,Math.PI*2);
     ctx.stroke();
   }
 
@@ -190,16 +197,18 @@ function processFrame(){
 }
 
 function calculatePhysics(){
-  if(velocities.length<5) return;
 
-  let measured=velocities.reduce((a,b)=>a+b)/velocities.length;
+  let measured=0;
+  if(velocities.length>0){
+    measured=velocities.reduce((a,b)=>a+b)/velocities.length;
+  }
 
-  let rpm=parseFloat(document.getElementById("rpm").value);
+  let rpm=parseFloat(document.getElementById("rpm").value)||0;
   let wheelRadius=0.05;
   let wheelSpeed=2*Math.PI*wheelRadius*(rpm/60);
-  let efficiency=(measured/wheelSpeed)*100;
+  let efficiency= wheelSpeed>0 ? (measured/wheelSpeed)*100 : 0;
 
-  let angleDeg=parseFloat(document.getElementById("angle").value);
+  let angleDeg=parseFloat(document.getElementById("angle").value)||0;
 
   let g=9.81;
   let magnus=(rpm/60)*0.1;
