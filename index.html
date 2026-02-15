@@ -134,16 +134,17 @@ function toggleHSV(){
 
 function toggleTracking(){
   tracking=!tracking;
+
   if(tracking){
     lastPos=null;
     lastTime=null;
     velocities=[];
     video.play();
-    requestAnimationFrame(processFrame);
+    video.requestVideoFrameCallback(processFrame);
   }
 }
 
-function processFrame(){
+function processFrame(now, metadata){
   if(!tracking) return;
 
   ctx.drawImage(video,0,0,canvas.width,canvas.height);
@@ -155,35 +156,44 @@ function processFrame(){
 
   for(let i=0;i<data.length;i+=4){
     let hsvVal=rgbToHsv(data[i],data[i+1],data[i+2]);
+
     if(hsvVal[0]>=hsv.hMin && hsvVal[0]<=hsv.hMax &&
        hsvVal[1]>hsv.sMin &&
        hsvVal[2]>hsv.vMin){
+
       let index=i/4;
       let x=index%canvas.width;
       let y=Math.floor(index/canvas.width);
-      sumX+=x; sumY+=y; count++;
+
+      sumX+=x;
+      sumY+=y;
+      count++;
     }
   }
 
-  if(count>150){
+  if(count>120){
+
     let x=sumX/count;
     let y=sumY/count;
 
     if(lastPos!==null){
+
       let dx=(x-lastPos.x)*scale;
       let dy=(y-lastPos.y)*scale;
-      let dt=(performance.now()-lastTime)/1000;
+
+      let dt=metadata.mediaTime-lastTime;
 
       if(dt>0){
         let speed=Math.sqrt(dx*dx+dy*dy)/dt;
-        if(speed>0.5){
+
+        if(speed>0.3){
           velocities.push(speed);
         }
       }
     }
 
     lastPos={x,y};
-    lastTime=performance.now();
+    lastTime=metadata.mediaTime;
 
     ctx.strokeStyle="lime";
     ctx.lineWidth=3;
@@ -193,7 +203,8 @@ function processFrame(){
   }
 
   calculatePhysics();
-  requestAnimationFrame(processFrame);
+
+  video.requestVideoFrameCallback(processFrame);
 }
 
 function calculatePhysics(){
