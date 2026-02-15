@@ -4,10 +4,24 @@
 <meta charset="UTF-8">
 <title>Robot Shot Analyzer</title>
 <style>
-body { background:#111; color:white; font-family:Arial; }
-canvas { border:1px solid white; display:block; }
-input { width:70px; }
-button { margin:4px; }
+body { background:#111; color:white; font-family:Arial; text-align:center; }
+
+.container{
+  display:flex;
+  justify-content:center;
+  gap:20px;
+  flex-wrap:wrap;
+}
+
+video, canvas{
+  max-width:45vw;
+  height:auto;
+  border:1px solid white;
+}
+
+input{ width:70px; }
+button{ margin:4px; padding:5px 10px; }
+
 </style>
 </head>
 <body>
@@ -20,63 +34,61 @@ Rod Length (m): <input type="number" id="rodLength" step="0.01" value="0.5">
 Angle (deg): <input type="number" id="angle" step="1" value="45">
 Wheel RPM: <input type="number" id="rpm" step="10" value="3000"><br><br>
 
+<button onclick="grabFrame()">Select Frame</button>
 <button onclick="calibrate()">Calibrate Rod</button>
+<button onclick="toggleHSV()">HSV Pick</button>
 <button onclick="toggleTracking()">Start / Stop Tracking</button>
-<button onclick="toggleHSV()">HSV Picker</button>
 
 <br><br>
-<video id="video" controls style="display:none"></video>
-<canvas id="canvas"></canvas>
+
+<div class="container">
+  <video id="video" controls></video>
+  <canvas id="canvas"></canvas>
+</div>
 
 <h3 id="results"></h3>
 
 <script>
-const video = document.getElementById("video");
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
+const video=document.getElementById("video");
+const canvas=document.getElementById("canvas");
+const ctx=canvas.getContext("2d");
 
-let tracking = false;
-let hsvMode = false;
-let scale = 1;
+let scale=1;
+let tracking=false;
+let lastPos=null;
+let lastVideoTime=null;
+let velocities=[];
+let calibrationPoints=[];
+let hsv={hMin:20,hMax:40,sMin:80,vMin:80};
 
-let lastPos = null;
-let lastTime = null;
-let velocities = [];
-
-let hsv = {hMin:20,hMax:40,sMin:100,sMax:255,vMin:100,vMax:255};
-let calibrationPoints = [];
-
-document.getElementById("videoUpload").onchange = e=>{
-  video.src = URL.createObjectURL(e.target.files[0]);
+document.getElementById("videoUpload").onchange=e=>{
+  video.src=URL.createObjectURL(e.target.files[0]);
 };
 
-video.onloadedmetadata = ()=>{
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  video.play();
+video.onloadedmetadata=()=>{
+  canvas.width=video.videoWidth;
+  canvas.height=video.videoHeight;
 };
 
-function drawFrame(){
+function grabFrame(){
+  video.pause();
   ctx.drawImage(video,0,0,canvas.width,canvas.height);
 }
 
 function calibrate(){
-  calibrationPoints = [];
-  alert("Çubuğun başlangıç ve bitiş noktasına tıkla");
+  calibrationPoints=[];
+  alert("Çubuğun iki ucuna tıkla");
 
-  canvas.onclick = e=>{
+  canvas.onclick=e=>{
     calibrationPoints.push({x:e.offsetX,y:e.offsetY});
-
     drawFrame();
 
-    // Kırmızı nokta çiz
     ctx.fillStyle="red";
     ctx.beginPath();
-    ctx.arc(e.offsetX,e.offsetY,8,0,Math.PI*2);
+    ctx.arc(e.offsetX,e.offsetY,6,0,Math.PI*2);
     ctx.fill();
 
     if(calibrationPoints.length==2){
-      // Çizgi çiz
       ctx.strokeStyle="red";
       ctx.lineWidth=3;
       ctx.beginPath();
@@ -84,39 +96,37 @@ function calibrate(){
       ctx.lineTo(calibrationPoints[1].x,calibrationPoints[1].y);
       ctx.stroke();
 
-      let rod = parseFloat(document.getElementById("rodLength").value);
-      let dx = calibrationPoints[1].x - calibrationPoints[0].x;
-      let dy = calibrationPoints[1].y - calibrationPoints[0].y;
-      let pixelDist = Math.sqrt(dx*dx+dy*dy);
-      scale = rod / pixelDist;
+      let rod=parseFloat(document.getElementById("rodLength").value);
+      let dx=calibrationPoints[1].x-calibrationPoints[0].x;
+      let dy=calibrationPoints[1].y-calibrationPoints[0].y;
+      let pixelDist=Math.sqrt(dx*dx+dy*dy);
+      scale=rod/pixelDist;
 
-      alert("Kalibrasyon tamamlandı ✅");
-      canvas.onclick = null;
+      canvas.onclick=null;
+      alert("Kalibrasyon tamam ✅");
     }
   };
 }
 
 function toggleHSV(){
-  hsvMode = true;
-  alert("Topun üzerine tıkla");
-
-  canvas.onclick = e=>{
-    drawFrame();
-    let data = ctx.getImageData(e.offsetX,e.offsetY,1,1).data;
-    let h = rgbToHsv(data[0],data[1],data[2])[0];
-    hsv.hMin = h-10;
-    hsv.hMax = h+10;
-    hsvMode=false;
+  alert("Topa tıkla");
+  canvas.onclick=e=>{
+    let data=ctx.getImageData(e.offsetX,e.offsetY,1,1).data;
+    let h=rgbToHsv(data[0],data[1],data[2])[0];
+    hsv.hMin=h-10;
+    hsv.hMax=h+10;
     canvas.onclick=null;
     alert("HSV ayarlandı ✅");
   };
 }
 
 function toggleTracking(){
-  tracking = !tracking;
+  tracking=!tracking;
   if(tracking){
     lastPos=null;
+    lastVideoTime=null;
     velocities=[];
+    video.play();
     requestAnimationFrame(processFrame);
   }
 }
@@ -124,24 +134,22 @@ function toggleTracking(){
 function processFrame(){
   if(!tracking) return;
 
-  drawFrame();
+  ctx.drawImage(video,0,0,canvas.width,canvas.height);
 
-  let img = ctx.getImageData(0,0,canvas.width,canvas.height);
-  let data = img.data;
+  let img=ctx.getImageData(0,0,canvas.width,canvas.height);
+  let data=img.data;
 
   let sumX=0,sumY=0,count=0;
 
   for(let i=0;i<data.length;i+=4){
-    let hsvVal = rgbToHsv(data[i],data[i+1],data[i+2]);
+    let hsvVal=rgbToHsv(data[i],data[i+1],data[i+2]);
     if(hsvVal[0]>=hsv.hMin && hsvVal[0]<=hsv.hMax &&
-       hsvVal[1]>=hsv.sMin &&
-       hsvVal[2]>=hsv.vMin){
+       hsvVal[1]>hsv.sMin &&
+       hsvVal[2]>hsv.vMin){
       let index=i/4;
       let x=index%canvas.width;
       let y=Math.floor(index/canvas.width);
-      sumX+=x;
-      sumY+=y;
-      count++;
+      sumX+=x; sumY+=y; count++;
     }
   }
 
@@ -149,20 +157,19 @@ function processFrame(){
     let x=sumX/count;
     let y=sumY/count;
 
-    if(lastPos){
+    if(lastPos!==null){
       let dx=(x-lastPos.x)*scale;
       let dy=(y-lastPos.y)*scale;
-      let dt=(performance.now()-lastTime)/1000;
+      let dt=video.currentTime-lastVideoTime;
 
-      let speed=Math.sqrt(dx*dx+dy*dy)/dt;
-
-      if(speed>0.5){ // sadece hareket eden
-        velocities.push(speed);
+      if(dt>0){
+        let speed=Math.sqrt(dx*dx+dy*dy)/dt;
+        if(speed>0.5) velocities.push(speed);
       }
     }
 
     lastPos={x,y};
-    lastTime=performance.now();
+    lastVideoTime=video.currentTime;
 
     ctx.strokeStyle="lime";
     ctx.lineWidth=3;
@@ -178,26 +185,24 @@ function processFrame(){
 function calculatePhysics(){
   if(velocities.length<5) return;
 
-  let measured = velocities.reduce((a,b)=>a+b)/velocities.length;
+  let measured=velocities.reduce((a,b)=>a+b)/velocities.length;
 
-  let rpm = parseFloat(document.getElementById("rpm").value);
-  let wheelRadius = 0.05;
-  let wheelSpeed = 2*Math.PI*wheelRadius*(rpm/60);
+  let rpm=parseFloat(document.getElementById("rpm").value);
+  let wheelRadius=0.05;
+  let wheelSpeed=2*Math.PI*wheelRadius*(rpm/60);
+  let efficiency=(measured/wheelSpeed)*100;
 
-  let efficiency = (measured/wheelSpeed)*100;
+  let angle=parseFloat(document.getElementById("angle").value);
 
-  let angleDeg = parseFloat(document.getElementById("angle").value);
-  let angle = angleDeg*Math.PI/180;
-
-  let g = 9.81;
-  let magnus = (rpm/60)*0.1;
-  let effectiveG = g - magnus;
+  let g=9.81;
+  let magnus=(rpm/60)*0.1;
+  let effectiveG=g-magnus;
 
   document.getElementById("results").innerHTML=
   `Measured Speed: ${measured.toFixed(2)} m/s<br>
    Wheel Surface Speed: ${wheelSpeed.toFixed(2)} m/s<br>
    Efficiency: ${efficiency.toFixed(1)} %<br><br>
-   Launch Angle: ${angleDeg}°<br>
+   Launch Angle: ${angle}°<br>
    Effective g: ${effectiveG.toFixed(2)} m/s²<br>
    Magnus: ${magnus.toFixed(2)} m/s²<br>
    Backspin ${magnus>1?"Var 🌀":"Yok"}`;
@@ -205,21 +210,25 @@ function calculatePhysics(){
 
 function rgbToHsv(r,g,b){
   r/=255; g/=255; b/=255;
-  let max=Math.max(r,g,b), min=Math.min(r,g,b);
+  let max=Math.max(r,g,b),min=Math.min(r,g,b);
   let h,s,v=max;
   let d=max-min;
   s=max==0?0:d/max;
 
-  if(max==min){ h=0; }
+  if(max==min){h=0;}
   else{
     switch(max){
-      case r: h=(g-b)/d+(g<b?6:0); break;
-      case g: h=(b-r)/d+2; break;
-      case b: h=(r-g)/d+4; break;
+      case r:h=(g-b)/d+(g<b?6:0);break;
+      case g:h=(b-r)/d+2;break;
+      case b:h=(r-g)/d+4;break;
     }
     h/=6;
   }
   return [h*360,s*255,v*255];
+}
+
+function drawFrame(){
+  ctx.drawImage(video,0,0,canvas.width,canvas.height);
 }
 </script>
 
