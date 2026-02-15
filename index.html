@@ -127,8 +127,8 @@ function toggleHSV(){
     let hsvVal=rgbToHsv(data[0],data[1],data[2]);
 
     let h=hsvVal[0];
-    hsv.hMin=(h-8+360)%360;
-    hsv.hMax=(h+8)%360;
+    hsv.hMin=(h-3+360)%360;
+    hsv.hMax=(h+3)%360;
     hsv.sMin=120;
     hsv.vMin=120;
 
