@@ -57,7 +57,16 @@ let lastPos=null;
 let lastTime=null;
 let velocities=[];
 let calibrationPoints=[];
-let hsv={hMin:20,hMax:40,sMin:80,vMin:80};
+let hsv={hMin:20,hMax:40,sMin:120,vMin:120};
+
+document.getElementById("videoUpload").onchange=e=>{
+  video.src=URL.createObjectURL(e.target.files[0]);
+};
+
+video.onloadedmetadata=()=>{
+  canvas.width=video.videoWidth;
+  canvas.height=video.videoHeight;
+};
 
 function getMousePos(evt){
   const rect = canvas.getBoundingClientRect();
@@ -68,15 +77,6 @@ function getMousePos(evt){
     y: (evt.clientY - rect.top) * scaleY
   };
 }
-
-document.getElementById("videoUpload").onchange=e=>{
-  video.src=URL.createObjectURL(e.target.files[0]);
-};
-
-video.onloadedmetadata=()=>{
-  canvas.width=video.videoWidth;
-  canvas.height=video.videoHeight;
-};
 
 function grabFrame(){
   video.pause();
@@ -120,15 +120,20 @@ function calibrate(){
 }
 
 function toggleHSV(){
-  alert("Topa tıkla");
+  alert("Topun TAM ortasına tıkla");
   canvas.onclick=e=>{
     const pos=getMousePos(e);
     let data=ctx.getImageData(pos.x,pos.y,1,1).data;
-    let h=rgbToHsv(data[0],data[1],data[2])[0];
-    hsv.hMin=h-10;
-    hsv.hMax=h+10;
+    let hsvVal=rgbToHsv(data[0],data[1],data[2]);
+
+    let h=hsvVal[0];
+    hsv.hMin=(h-8+360)%360;
+    hsv.hMax=(h+8)%360;
+    hsv.sMin=120;
+    hsv.vMin=120;
+
     canvas.onclick=null;
-    alert("HSV ayarlandı ✅");
+    alert("HSV dar mod ayarlandı ✅");
   };
 }
 
@@ -144,6 +149,13 @@ function toggleTracking(){
   }
 }
 
+function hueMatch(h){
+  if(hsv.hMin<hsv.hMax)
+    return h>=hsv.hMin && h<=hsv.hMax;
+  else
+    return h>=hsv.hMin || h<=hsv.hMax;
+}
+
 function processFrame(now, metadata){
   if(!tracking) return;
 
@@ -155,21 +167,21 @@ function processFrame(now, metadata){
   let blobs=[];
   let visited=new Uint8Array(canvas.width*canvas.height);
 
-  function index(x,y){
-    return y*canvas.width+x;
-  }
+  function index(x,y){ return y*canvas.width+x; }
 
   function isMatch(i){
     let hsvVal=rgbToHsv(data[i],data[i+1],data[i+2]);
     return (
-      hsvVal[0]>=hsv.hMin && hsvVal[0]<=hsv.hMax &&
+      hueMatch(hsvVal[0]) &&
       hsvVal[1]>hsv.sMin &&
       hsvVal[2]>hsv.vMin
     );
   }
 
-  for(let y=0;y<canvas.height;y++){
-    for(let x=0;x<canvas.width;x++){
+  let step=2;
+
+  for(let y=0;y<canvas.height;y+=step){
+    for(let x=0;x<canvas.width;x+=step){
 
       let idx=index(x,y);
       if(visited[idx]) continue;
@@ -186,8 +198,8 @@ function processFrame(now, metadata){
         blob.push([cx,cy]);
 
         let neighbors=[
-          [cx+1,cy],[cx-1,cy],
-          [cx,cy+1],[cx,cy-1]
+          [cx+step,cy],[cx-step,cy],
+          [cx,cy+step],[cx,cy-step]
         ];
 
         for(let [nx,ny] of neighbors){
@@ -204,7 +216,7 @@ function processFrame(now, metadata){
         }
       }
 
-      if(blob.length>200){
+      if(blob.length>150){
         blobs.push(blob);
       }
     }
@@ -212,17 +224,33 @@ function processFrame(now, metadata){
 
   if(blobs.length>0){
 
-    blobs.sort((a,b)=>b.length-a.length);
-    let largest=blobs[0];
+    let centerX=canvas.width/2;
+    let centerY=canvas.height/2;
 
-    let sumX=0,sumY=0;
-    for(let p of largest){
-      sumX+=p[0];
-      sumY+=p[1];
+    let bestBlob=null;
+    let bestDist=999999;
+
+    for(let blob of blobs){
+
+      let sumX=0,sumY=0;
+      for(let p of blob){
+        sumX+=p[0];
+        sumY+=p[1];
+      }
+
+      let x=sumX/blob.length;
+      let y=sumY/blob.length;
+
+      let dist=Math.hypot(x-centerX,y-centerY);
+
+      if(dist<bestDist){
+        bestDist=dist;
+        bestBlob={x,y};
+      }
     }
 
-    let x=sumX/largest.length;
-    let y=sumY/largest.length;
+    let x=bestBlob.x;
+    let y=bestBlob.y;
 
     if(lastPos!==null){
       let dx=(x-lastPos.x)*scale;
@@ -231,8 +259,11 @@ function processFrame(now, metadata){
 
       if(dt>0){
         let speed=Math.sqrt(dx*dx+dy*dy)/dt;
-        if(speed>0.3){
+
+        if(speed>0.5 && speed<40){
           velocities.push(speed);
+          if(velocities.length>10)
+            velocities.shift();
         }
       }
     }
@@ -243,13 +274,14 @@ function processFrame(now, metadata){
     ctx.strokeStyle="lime";
     ctx.lineWidth=3;
     ctx.beginPath();
-    ctx.arc(x,y,12,0,Math.PI*2);
+    ctx.arc(x,y,14,0,Math.PI*2);
     ctx.stroke();
   }
 
   calculatePhysics();
   video.requestVideoFrameCallback(processFrame);
 }
+
 function calculatePhysics(){
 
   let measured=0;
@@ -297,6 +329,5 @@ function rgbToHsv(r,g,b){
   return [h*360,s*255,v*255];
 }
 </script>
-
 </body>
 </html>
