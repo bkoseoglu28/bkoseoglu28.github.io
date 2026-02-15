@@ -2,27 +2,20 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Robot Shot Analyzer</title>
+<title>Robot Shot Analyzer v2</title>
 <style>
 body { background:#111; color:white; font-family:Arial; text-align:center; }
-.container{
-  display:flex;
-  justify-content:center;
-  gap:20px;
-  flex-wrap:wrap;
-}
-video, canvas{
-  max-width:45vw;
-  height:auto;
-  border:1px solid white;
-}
-input{ width:70px; }
-button{ margin:4px; padding:5px 10px; }
+.container{ display:flex; justify-content:center; gap:20px; flex-wrap:wrap; }
+video, canvas{ max-width:45vw; height:auto; border:1px solid #444; }
+input{ width:70px; background:#222; color:white; border:1px solid #555; padding:4px; }
+button{ margin:4px; padding:6px 12px; cursor:pointer; background:#007bff; color:white; border:none; border-radius:4px;}
+button:hover{ background:#0056b3; }
+#results { background:#222; padding:15px; border-radius:8px; display:inline-block; text-align:left; min-width:200px; }
 </style>
 </head>
 <body>
 
-<h2>Robot Shot Analyzer</h2>
+<h2>Robot Shot Analyzer v2</h2>
 
 <input type="file" id="videoUpload" accept="video/*"><br><br>
 
@@ -38,23 +31,24 @@ Wheel RPM: <input type="number" id="rpm" step="10" value="3000"><br><br>
 <br><br>
 
 <div class="container">
-  <video id="video" controls></video>
+  <video id="video" controls playsinline></video>
   <canvas id="canvas"></canvas>
 </div>
 
-<h3 id="results"></h3>
+<h3 id="results">Sonuçlar bekleniyor...</h3>
 
 <script>
 const video=document.getElementById("video");
 const canvas=document.getElementById("canvas");
-const ctx=canvas.getContext("2d");
+const ctx=canvas.getContext("2d", { willReadFrequently: true }); // Performans için önemli
 
-let scale=1;
+let scale=0;
 let tracking=false;
 let lastPos=null;
 let lastTime=null;
 
-let hsv={hMin:20,hMax:40,sMin:120,vMin:120};
+// Daha toleranslı varsayılan değerler
+let hsv={hMin:0,hMax:0,sMin:60,vMin:60};
 
 let launchSpeed=0;
 let capturing=false;
@@ -62,7 +56,13 @@ let captureFrames=[];
 let locked=false;
 
 document.getElementById("videoUpload").onchange=e=>{
-  video.src=URL.createObjectURL(e.target.files[0]);
+  if(e.target.files && e.target.files[0]){
+    video.src=URL.createObjectURL(e.target.files[0]);
+    // Reset
+    locked=false;
+    launchSpeed=0;
+    lastPos=null;
+  }
 };
 
 video.onloadedmetadata=()=>{
@@ -87,21 +87,22 @@ function grabFrame(){
 
 function calibrate(){
   let points=[];
-  alert("Çubuğun iki ucuna tıkla");
+  alert("Referans çubuğunun iki ucuna tıkla");
 
   canvas.onclick=e=>{
     const pos=getMousePos(e);
     points.push(pos);
 
     ctx.drawImage(video,0,0,canvas.width,canvas.height);
+    // Mevcut noktaları çiz
     ctx.fillStyle="red";
-    ctx.beginPath();
-    ctx.arc(pos.x,pos.y,8,0,Math.PI*2);
-    ctx.fill();
+    points.forEach(p => {
+        ctx.beginPath(); ctx.arc(p.x,p.y,5,0,Math.PI*2); ctx.fill();
+    });
 
     if(points.length==2){
       ctx.strokeStyle="red";
-      ctx.lineWidth=4;
+      ctx.lineWidth=3;
       ctx.beginPath();
       ctx.moveTo(points[0].x,points[0].y);
       ctx.lineTo(points[1].x,points[1].y);
@@ -111,35 +112,38 @@ function calibrate(){
       let dx=points[1].x-points[0].x;
       let dy=points[1].y-points[0].y;
       let pixelDist=Math.sqrt(dx*dx+dy*dy);
-      scale=rod/pixelDist;
-
+      
+      if(pixelDist > 0) {
+        scale=rod/pixelDist;
+        alert(`Kalibrasyon: 1 px = ${(scale*1000).toFixed(2)} mm`);
+      }
       canvas.onclick=null;
-      alert("Kalibrasyon tamam ✅");
     }
   };
 }
 
 function toggleHSV(){
-  alert("Topun ortasına tıkla");
+  alert("Topun rengini seçmek için üzerine tıkla");
   canvas.onclick=e=>{
     const pos=getMousePos(e);
     let data=ctx.getImageData(pos.x,pos.y,1,1).data;
     let hsvVal=rgbToHsv(data[0],data[1],data[2]);
 
     let h=hsvVal[0];
-    hsv.hMin=(h-3+360)%360;
-    hsv.hMax=(h+3)%360;
-    hsv.sMin=120;
-    hsv.vMin=120;
+    // Tolerans aralığı (±10 derece)
+    hsv.hMin=(h-10+360)%360;
+    hsv.hMax=(h+10)%360;
+    // Saturation ve Value için daha düşük eşik
+    hsv.sMin=Math.max(20, hsvVal[1] - 50); 
+    hsv.vMin=Math.max(20, hsvVal[2] - 50);
 
     canvas.onclick=null;
-    alert("HSV ayarlandı ✅");
+    alert(`Renk Ayarlandı: H:${h.toFixed(0)}`);
   };
 }
 
 function toggleTracking(){
   tracking=!tracking;
-
   if(tracking){
     lastPos=null;
     lastTime=null;
@@ -147,8 +151,17 @@ function toggleTracking(){
     captureFrames=[];
     capturing=false;
     locked=false;
+    
+    if(scale === 0) {
+        alert("Önce Kalibrasyon Yap!");
+        tracking = false;
+        return;
+    }
+    
     video.play();
     video.requestVideoFrameCallback(processFrame);
+  } else {
+    video.pause();
   }
 }
 
@@ -163,116 +176,137 @@ function processFrame(now, metadata){
   if(!tracking) return;
 
   ctx.drawImage(video,0,0,canvas.width,canvas.height);
+  
+  // Performans için arama penceresi (Search Window)
+  let startX = 0, startY = 0, w = canvas.width, h = canvas.height;
+  
+  // Eğer son konum biliniyorsa, sadece o bölgeyi ara (±150px)
+  if(lastPos) {
+      const windowSize = 150;
+      startX = Math.max(0, Math.floor(lastPos.x - windowSize));
+      startY = Math.max(0, Math.floor(lastPos.y - windowSize));
+      w = Math.min(canvas.width - startX, windowSize * 2);
+      h = Math.min(canvas.height - startY, windowSize * 2);
+  }
 
-  let img=ctx.getImageData(0,0,canvas.width,canvas.height);
+  let img=ctx.getImageData(startX, startY, w, h);
   let data=img.data;
 
-  let centerX=canvas.width/2;
-  let centerY=canvas.height/2;
+  let totalX=0, totalY=0, count=0;
 
-  let bestX=null;
-  let bestY=null;
-  let bestDist=999999;
+  // Adım sayısını 2 yaparak hızı artırıyoruz
+  for(let y=0; y<h; y+=2){
+    for(let x=0; x<w; x+=2){
+      let i=(y*w+x)*4;
+      // Basit optimizasyon: Önce yeşil kanalına bakılabilir ama HSV şart
+      let r=data[i], g=data[i+1], b=data[i+2];
 
-  for(let y=0;y<canvas.height;y+=2){
-    for(let x=0;x<canvas.width;x+=2){
+      // Hızlı ön eleme (Gri tonları atla)
+      if(Math.abs(r-g)<10 && Math.abs(g-b)<10) continue; 
 
-      let i=(y*canvas.width+x)*4;
-      let hsvVal=rgbToHsv(data[i],data[i+1],data[i+2]);
+      let hsvVal=rgbToHsv(r,g,b);
 
       if(hueMatch(hsvVal[0]) && hsvVal[1]>hsv.sMin && hsvVal[2]>hsv.vMin){
-
-        let dist=Math.hypot(x-centerX,y-centerY);
-
-        if(dist<bestDist){
-          bestDist=dist;
-          bestX=x;
-          bestY=y;
-        }
+        totalX += (startX + x);
+        totalY += (startY + y);
+        count++;
       }
     }
   }
 
-  if(bestX!==null){
+  // Bir cisim bulunduysa
+  if(count > 5){ // Gürültüyü önlemek için en az 5 piksel
+    let currentX = totalX / count;
+    let currentY = totalY / count;
 
+    // Hız hesaplama
     if(lastPos!==null){
-      let dx=(bestX-lastPos.x)*scale;
-      let dy=(bestY-lastPos.y)*scale;
-      let dt=metadata.mediaTime-lastTime;
+      let dx=(currentX-lastPos.x)*scale;
+      let dy=(currentY-lastPos.y)*scale;
+      let dt=(metadata.mediaTime - lastTime); // saniye cinsinden
 
-      if(dt>0){
-
+      if(dt>0.001){ // Sıfıra bölme hatası önlemi
         let speed=Math.sqrt(dx*dx+dy*dy)/dt;
 
         if(!locked){
-
-          if(speed>1 && !capturing){
+          // Hız filtresi (Hareketsizken ölçme)
+          if(speed>0.5 && !capturing){
             capturing=true;
             captureFrames=[];
           }
 
           if(capturing){
             captureFrames.push(speed);
-
-            if(captureFrames.length>=6){
+            // 5 kare ortalamasını al
+            if(captureFrames.length>=5){
               launchSpeed = captureFrames.reduce((a,b)=>a+b)/captureFrames.length;
               locked=true;
               capturing=false;
+              calculatePhysics();
             }
           }
         }
       }
     }
 
-    lastPos={x:bestX,y:bestY};
+    lastPos={x:currentX,y:currentY};
     lastTime=metadata.mediaTime;
 
+    // Görselleştirme
     ctx.strokeStyle="lime";
-    ctx.lineWidth=3;
+    ctx.lineWidth=2;
     ctx.beginPath();
-    ctx.arc(bestX,bestY,14,0,Math.PI*2);
+    ctx.arc(currentX, currentY, 20, 0, Math.PI*2);
     ctx.stroke();
+    
+    // Merkez noktası
+    ctx.fillStyle="lime";
+    ctx.fillRect(currentX-2, currentY-2, 4, 4);
+  } else {
+      // Top kaybedilirse lastPos'u hemen sıfırlama, belki bir frame atlamıştır.
+      // Ancak çok uzun süre bulunamazsa sıfırlanabilir.
   }
 
-  calculatePhysics();
+  if(locked) calculatePhysics();
+  
   video.requestVideoFrameCallback(processFrame);
 }
 
 function calculatePhysics(){
-
   let measured=launchSpeed;
-
   let rpm=parseFloat(document.getElementById("rpm").value)||0;
   let angleDeg=parseFloat(document.getElementById("angle").value)||0;
 
-  let wheelRadius=0.05;
+  let wheelRadius=0.05; // 5cm tekerlek varsayılanı (Robotlar için genelde 3-5cm arasıdır)
   let wheelSpeed=2*Math.PI*wheelRadius*(rpm/60);
   let efficiency= wheelSpeed>0 ? (measured/wheelSpeed)*100 : 0;
 
-  let ballRadius=0.05;
-  let ballMass=0.27;
-  let airDensity=1.2;
+  let ballRadius=0.07; // 14cm çaplı top (standart robot yarışmaları)
+  let ballMass=0.27; // kg
+  let airDensity=1.225;
 
-  let omega=2*Math.PI*(rpm/60);
+  let omega=2*Math.PI*(rpm/60); // Basitleştirilmiş: Topun tekerlek hızıyla döndüğünü varsayıyoruz
   let spinRatio = measured>0 ? (omega*ballRadius)/measured : 0;
-  let C_L = Math.min(1.6*spinRatio,1.5);
+  
+  // Basit Magnus Yaklaşımı
+  let C_L = Math.min(1.5 * spinRatio, 1.2); 
 
   let area = Math.PI*ballRadius*ballRadius;
   let magnusForce = 0.5*airDensity*area*measured*measured*C_L;
   let magnusAccel = ballMass>0 ? magnusForce/ballMass : 0;
 
-  let g=9.81;
-  let effectiveG=g-magnusAccel;
+  // Backspin yerçekimini yener
+  let effectiveG = 9.81 - magnusAccel;
 
   document.getElementById("results").innerHTML=
-  `Measured Speed: ${measured.toFixed(2)} m/s<br>
-   Wheel Surface Speed: ${wheelSpeed.toFixed(2)} m/s<br>
-   Efficiency: ${efficiency.toFixed(1)} %<br><br>
-   Launch Angle: ${angleDeg}°<br>
-   Spin Ratio: ${spinRatio.toFixed(2)}<br>
-   Magnus Accel: ${magnusAccel.toFixed(2)} m/s²<br>
-   Effective g: ${effectiveG.toFixed(2)} m/s²<br>
-   Backspin ${magnusAccel>0.5?"Var 🌀":"Yok"}`;
+  `<strong>Measured Speed:</strong> ${measured.toFixed(2)} m/s<br>
+   <strong>Wheel Surface Speed:</strong> ${wheelSpeed.toFixed(2)} m/s<br>
+   <strong>Efficiency:</strong> ${efficiency.toFixed(1)} %<br>
+   <hr>
+   <strong>Launch Angle:</strong> ${angleDeg}°<br>
+   <strong>Est. Lift Force:</strong> ${magnusForce.toFixed(2)} N<br>
+   <strong>Effective Gravity:</strong> ${effectiveG.toFixed(2)} m/s²<br>
+   <span style="color:${effectiveG<9.81?'lime':'red'}">${effectiveG<9.81?"Lift (Backspin) Detected ✈️":"No Lift / Topspin ⬇️"}</span>`;
 }
 
 function rgbToHsv(r,g,b){
