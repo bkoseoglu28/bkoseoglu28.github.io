@@ -6,7 +6,7 @@
 <style>
 body { background:#111; color:white; font-family:Arial; text-align:center; }
 canvas { border:2px solid white; margin-top:10px; }
-input { margin:3px; }
+input { margin:4px; }
 .slider { width:200px; }
 button { margin:5px; padding:8px; }
 </style>
@@ -27,9 +27,10 @@ button { margin:5px; padding:8px; }
 <input type="number" id="rpm"><br>
 
 <button onclick="captureFrame()">Frame Yakala</button>
-<button onclick="enableCalibration()">📏 Kalibrasyon Modu</button>
-<button onclick="enableHSV()">🎯 HSV Renk Seç</button>
+<button onclick="enableCalibration()">📏 Kalibrasyon</button>
+<button onclick="enableHSV()">🎯 HSV Seç</button>
 <button onclick="startTracking()">🟢 Tracking Başlat</button>
+<button onclick="stopTracking()">⛔ Tracking Durdur</button>
 <button onclick="analyzePhysics()">🌀 Backspin Analizi</button>
 
 <h3>HSV Ayarları</h3>
@@ -70,7 +71,7 @@ function captureFrame(){
 function enableCalibration(){
     mode = "calibration";
     calibrationPoints = [];
-    alert("Kalibrasyon modu aktif. Çubuğun iki ucuna tıkla.");
+    alert("Kalibrasyon aktif. Çubuğun iki ucuna tıkla.");
 }
 
 function enableHSV(){
@@ -107,7 +108,7 @@ canvas.addEventListener('click', function(e){
         }
     }
 
-    if(mode === "hsv"){
+    else if(mode === "hsv"){
 
         let pixel = ctx.getImageData(x,y,1,1).data;
         let hsv = rgbToHsv(pixel[0],pixel[1],pixel[2]);
@@ -115,7 +116,9 @@ canvas.addEventListener('click', function(e){
         document.getElementById("hMin").value = Math.max(0,hsv.h-15);
         document.getElementById("hMax").value = Math.min(360,hsv.h+15);
         document.getElementById("sMin").value = Math.max(0,hsv.s-20);
+        document.getElementById("sMax").value = 100;
         document.getElementById("vMin").value = Math.max(0,hsv.v-20);
+        document.getElementById("vMax").value = 100;
 
         alert("HSV ayarlandı.");
         mode = "none";
@@ -142,20 +145,20 @@ function startTracking(){
 
         let totalX=0,totalY=0,count=0;
 
-        let hMin=parseFloat(hMin.value);
-        let hMax=parseFloat(hMax.value);
-        let sMin=parseFloat(sMin.value);
-        let sMax=parseFloat(sMax.value);
-        let vMin=parseFloat(vMin.value);
-        let vMax=parseFloat(vMax.value);
+        let hMinVal = parseFloat(document.getElementById("hMin").value);
+        let hMaxVal = parseFloat(document.getElementById("hMax").value);
+        let sMinVal = parseFloat(document.getElementById("sMin").value);
+        let sMaxVal = parseFloat(document.getElementById("sMax").value);
+        let vMinVal = parseFloat(document.getElementById("vMin").value);
+        let vMaxVal = parseFloat(document.getElementById("vMax").value);
 
         for(let i=0;i<data.length;i+=4){
 
-            let hsv=rgbToHsv(data[i],data[i+1],data[i+2]);
+            let hsv = rgbToHsv(data[i],data[i+1],data[i+2]);
 
-            if(hsv.h>=hMin && hsv.h<=hMax &&
-               hsv.s>=sMin && hsv.s<=sMax &&
-               hsv.v>=vMin && hsv.v<=vMax){
+            if(hsv.h>=hMinVal && hsv.h<=hMaxVal &&
+               hsv.s>=sMinVal && hsv.s<=sMaxVal &&
+               hsv.v>=vMinVal && hsv.v<=vMaxVal){
 
                 let idx=i/4;
                 let x=idx%canvas.width;
@@ -167,7 +170,7 @@ function startTracking(){
             }
         }
 
-        if(count>200){
+        if(count>300){
 
             let cx=totalX/count;
             let cy=totalY/count;
@@ -188,6 +191,10 @@ function startTracking(){
     }
 
     process();
+}
+
+function stopTracking(){
+    tracking = false;
 }
 
 function analyzePhysics(){
@@ -225,7 +232,18 @@ function analyzePhysics(){
     let g_effective=-2*a;
     let magnus=9.81-g_effective;
 
+    let rpm=parseFloat(document.getElementById("rpm").value);
+    let wheelDiameter=parseFloat(document.getElementById("wheelDiameter").value);
+    let wheelSurfaceSpeed=(Math.PI*wheelDiameter*rpm)/60;
+
+    let dx=trajectory[trajectory.length-1].x-trajectory[0].x;
+    let dt=trajectory[trajectory.length-1].t-trajectory[0].t;
+    let measuredSpeed=dx/dt;
+
     document.getElementById("result").innerHTML=
+        "Measured Speed: "+measuredSpeed.toFixed(2)+" m/s<br>"+
+        "Wheel Surface Speed: "+wheelSurfaceSpeed.toFixed(2)+" m/s<br>"+
+        "Efficiency: "+((measuredSpeed/wheelSurfaceSpeed)*100).toFixed(1)+"%<br><br>"+
         "Effective g: "+g_effective.toFixed(2)+" m/s²<br>"+
         "Magnus: "+magnus.toFixed(2)+" m/s²<br>"+
         (g_effective<9.5?"Backspin Var 🌀":"Backspin Yok");
