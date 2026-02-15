@@ -152,40 +152,85 @@ function processFrame(now, metadata){
   let img=ctx.getImageData(0,0,canvas.width,canvas.height);
   let data=img.data;
 
-  let sumX=0,sumY=0,count=0;
+  let blobs=[];
+  let visited=new Uint8Array(canvas.width*canvas.height);
 
-  for(let i=0;i<data.length;i+=4){
+  function index(x,y){
+    return y*canvas.width+x;
+  }
+
+  function isMatch(i){
     let hsvVal=rgbToHsv(data[i],data[i+1],data[i+2]);
+    return (
+      hsvVal[0]>=hsv.hMin && hsvVal[0]<=hsv.hMax &&
+      hsvVal[1]>hsv.sMin &&
+      hsvVal[2]>hsv.vMin
+    );
+  }
 
-    if(hsvVal[0]>=hsv.hMin && hsvVal[0]<=hsv.hMax &&
-       hsvVal[1]>hsv.sMin &&
-       hsvVal[2]>hsv.vMin){
+  for(let y=0;y<canvas.height;y++){
+    for(let x=0;x<canvas.width;x++){
 
-      let index=i/4;
-      let x=index%canvas.width;
-      let y=Math.floor(index/canvas.width);
+      let idx=index(x,y);
+      if(visited[idx]) continue;
 
-      sumX+=x;
-      sumY+=y;
-      count++;
+      let pixelIndex=idx*4;
+      if(!isMatch(pixelIndex)) continue;
+
+      let stack=[[x,y]];
+      let blob=[];
+      visited[idx]=1;
+
+      while(stack.length>0){
+        let [cx,cy]=stack.pop();
+        blob.push([cx,cy]);
+
+        let neighbors=[
+          [cx+1,cy],[cx-1,cy],
+          [cx,cy+1],[cx,cy-1]
+        ];
+
+        for(let [nx,ny] of neighbors){
+          if(nx>=0 && ny>=0 && nx<canvas.width && ny<canvas.height){
+            let nIdx=index(nx,ny);
+            if(!visited[nIdx]){
+              visited[nIdx]=1;
+              let pIndex=nIdx*4;
+              if(isMatch(pIndex)){
+                stack.push([nx,ny]);
+              }
+            }
+          }
+        }
+      }
+
+      if(blob.length>200){
+        blobs.push(blob);
+      }
     }
   }
 
-  if(count>120){
+  if(blobs.length>0){
 
-    let x=sumX/count;
-    let y=sumY/count;
+    blobs.sort((a,b)=>b.length-a.length);
+    let largest=blobs[0];
+
+    let sumX=0,sumY=0;
+    for(let p of largest){
+      sumX+=p[0];
+      sumY+=p[1];
+    }
+
+    let x=sumX/largest.length;
+    let y=sumY/largest.length;
 
     if(lastPos!==null){
-
       let dx=(x-lastPos.x)*scale;
       let dy=(y-lastPos.y)*scale;
-
       let dt=metadata.mediaTime-lastTime;
 
       if(dt>0){
         let speed=Math.sqrt(dx*dx+dy*dy)/dt;
-
         if(speed>0.3){
           velocities.push(speed);
         }
@@ -203,10 +248,8 @@ function processFrame(now, metadata){
   }
 
   calculatePhysics();
-
   video.requestVideoFrameCallback(processFrame);
 }
-
 function calculatePhysics(){
 
   let measured=0;
