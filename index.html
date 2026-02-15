@@ -1,53 +1,18 @@
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>Robot Shot Analyzer v2</title>
-<style>
-body { background:#111; color:white; font-family:Arial; text-align:center; }
-.container{ display:flex; justify-content:center; gap:20px; flex-wrap:wrap; }
-video, canvas{ max-width:45vw; height:auto; border:1px solid #444; }
-input{ width:70px; background:#222; color:white; border:1px solid #555; padding:4px; }
-button{ margin:4px; padding:6px 12px; cursor:pointer; background:#007bff; color:white; border:none; border-radius:4px;}
-button:hover{ background:#0056b3; }
-#results { background:#222; padding:15px; border-radius:8px; display:inline-block; text-align:left; min-width:200px; }
-</style>
-</head>
-<body>
-
-<h2>Robot Shot Analyzer v2</h2>
-
-<input type="file" id="videoUpload" accept="video/*"><br><br>
-
-Rod Length (m): <input type="number" id="rodLength" step="0.01" value="0.5">
-Angle (deg): <input type="number" id="angle" step="1" value="45">
-Wheel RPM: <input type="number" id="rpm" step="10" value="3000"><br><br>
-
-<button onclick="grabFrame()">Select Frame</button>
-<button onclick="calibrate()">Calibrate Rod</button>
-<button onclick="toggleHSV()">HSV Pick</button>
-<button onclick="toggleTracking()">Start / Stop Tracking</button>
-
-<br><br>
-
-<div class="container">
-  <video id="video" controls playsinline></video>
-  <canvas id="canvas"></canvas>
-</div>
-
-<h3 id="results">Sonuçlar bekleniyor...</h3>
-
 <script>
 const video=document.getElementById("video");
 const canvas=document.getElementById("canvas");
-const ctx=canvas.getContext("2d", { willReadFrequently: true }); // Performans için önemli
+const ctx=canvas.getContext("2d", { willReadFrequently: true });
 
 let scale=0;
 let tracking=false;
 let lastPos=null;
 let lastTime=null;
 
-// Daha toleranslı varsayılan değerler
+// Bir önceki karenin piksel verilerini saklamak için
+let previousFrameData = null; 
+// Hareket hassasiyeti (Düşük sayı = çok hassas, Yüksek sayı = sadece büyük değişimler)
+let motionThreshold = 30; 
+
 let hsv={hMin:0,hMax:0,sMin:60,vMin:60};
 
 let launchSpeed=0;
@@ -58,10 +23,10 @@ let locked=false;
 document.getElementById("videoUpload").onchange=e=>{
   if(e.target.files && e.target.files[0]){
     video.src=URL.createObjectURL(e.target.files[0]);
-    // Reset
     locked=false;
     launchSpeed=0;
     lastPos=null;
+    previousFrameData=null; // Videoyu değiştirince hafızayı temizle
   }
 };
 
@@ -94,7 +59,6 @@ function calibrate(){
     points.push(pos);
 
     ctx.drawImage(video,0,0,canvas.width,canvas.height);
-    // Mevcut noktaları çiz
     ctx.fillStyle="red";
     points.forEach(p => {
         ctx.beginPath(); ctx.arc(p.x,p.y,5,0,Math.PI*2); ctx.fill();
@@ -130,15 +94,13 @@ function toggleHSV(){
     let hsvVal=rgbToHsv(data[0],data[1],data[2]);
 
     let h=hsvVal[0];
-    // Tolerans aralığı (±10 derece)
-    hsv.hMin=(h-10+360)%360;
-    hsv.hMax=(h+10)%360;
-    // Saturation ve Value için daha düşük eşik
-    hsv.sMin=Math.max(20, hsvVal[1] - 50); 
-    hsv.vMin=Math.max(20, hsvVal[2] - 50);
+    hsv.hMin=(h-15+360)%360; // Toleransı biraz artırdım (±15)
+    hsv.hMax=(h+15)%360;
+    hsv.sMin=Math.max(20, hsvVal[1] - 60); 
+    hsv.vMin=Math.max(20, hsvVal[2] - 60);
 
     canvas.onclick=null;
-    alert(`Renk Ayarlandı: H:${h.toFixed(0)}`);
+    alert(`Renk Ayarlandı. Hareket eden cisimler aranacak.`);
   };
 }
 
@@ -151,6 +113,7 @@ function toggleTracking(){
     captureFrames=[];
     capturing=false;
     locked=false;
+    previousFrameData = null; // Takip başlayınca resetle
     
     if(scale === 0) {
         alert("Önce Kalibrasyon Yap!");
@@ -177,67 +140,87 @@ function processFrame(now, metadata){
 
   ctx.drawImage(video,0,0,canvas.width,canvas.height);
   
-  // Performans için arama penceresi (Search Window)
+  // Arama Penceresi (Search Window)
   let startX = 0, startY = 0, w = canvas.width, h = canvas.height;
   
-  // Eğer son konum biliniyorsa, sadece o bölgeyi ara (±150px)
   if(lastPos) {
-      const windowSize = 150;
+      const windowSize = 200; // Pencereyi biraz genişlettim hızlı toplar için
       startX = Math.max(0, Math.floor(lastPos.x - windowSize));
       startY = Math.max(0, Math.floor(lastPos.y - windowSize));
       w = Math.min(canvas.width - startX, windowSize * 2);
       h = Math.min(canvas.height - startY, windowSize * 2);
   }
 
-  let img=ctx.getImageData(startX, startY, w, h);
-  let data=img.data;
-
+  // Şu anki karenin verisini al
+  let img = ctx.getImageData(startX, startY, w, h);
+  let data = img.data;
+  
+  // Bir önceki karenin verisini al (Eğer pencere boyutu değişmediyse)
+  // Not: Basitlik için sadece window içindeki değişime bakacağız.
+  
   let totalX=0, totalY=0, count=0;
 
-  // Adım sayısını 2 yaparak hızı artırıyoruz
   for(let y=0; y<h; y+=2){
     for(let x=0; x<w; x+=2){
       let i=(y*w+x)*4;
-      // Basit optimizasyon: Önce yeşil kanalına bakılabilir ama HSV şart
       let r=data[i], g=data[i+1], b=data[i+2];
 
-      // Hızlı ön eleme (Gri tonları atla)
-      if(Math.abs(r-g)<10 && Math.abs(g-b)<10) continue; 
+      // 1. Önce RENK kontrolü (İşlemciyi yormamak için)
+      if(Math.abs(r-g)<10 && Math.abs(g-b)<10) continue; // Gri/Beyaz eleme
 
       let hsvVal=rgbToHsv(r,g,b);
-
       if(hueMatch(hsvVal[0]) && hsvVal[1]>hsv.sMin && hsvVal[2]>hsv.vMin){
-        totalX += (startX + x);
-        totalY += (startY + y);
-        count++;
+        
+        // 2. HAREKET KONTROLÜ (Motion Detection)
+        let isMoving = false;
+        if(previousFrameData && previousFrameData.length === data.length) {
+            let pr = previousFrameData[i];
+            let pg = previousFrameData[i+1];
+            let pb = previousFrameData[i+2];
+            
+            // RGB farkı toplamı
+            let diff = Math.abs(r-pr) + Math.abs(g-pg) + Math.abs(b-pb);
+            
+            if(diff > motionThreshold) {
+                isMoving = true;
+            }
+        } else {
+            // İlk karede hareket kontrolü yapamayız, mecburen kabul ediyoruz
+            isMoving = true; 
+        }
+
+        if(isMoving) {
+            totalX += (startX + x);
+            totalY += (startY + y);
+            count++;
+        }
       }
     }
   }
 
-  // Bir cisim bulunduysa
-  if(count > 5){ // Gürültüyü önlemek için en az 5 piksel
+  // Mevcut kareyi, bir sonraki döngüde kullanmak üzere sakla
+  // Uint8ClampedArray'i kopyalamamız lazım yoksa referans tutar
+  previousFrameData = new Uint8ClampedArray(data);
+
+  if(count > 5){
     let currentX = totalX / count;
     let currentY = totalY / count;
 
-    // Hız hesaplama
     if(lastPos!==null){
       let dx=(currentX-lastPos.x)*scale;
       let dy=(currentY-lastPos.y)*scale;
-      let dt=(metadata.mediaTime - lastTime); // saniye cinsinden
+      let dt=(metadata.mediaTime - lastTime);
 
-      if(dt>0.001){ // Sıfıra bölme hatası önlemi
+      if(dt>0.001){
         let speed=Math.sqrt(dx*dx+dy*dy)/dt;
 
         if(!locked){
-          // Hız filtresi (Hareketsizken ölçme)
           if(speed>0.5 && !capturing){
             capturing=true;
             captureFrames=[];
           }
-
           if(capturing){
             captureFrames.push(speed);
-            // 5 kare ortalamasını al
             if(captureFrames.length>=5){
               launchSpeed = captureFrames.reduce((a,b)=>a+b)/captureFrames.length;
               locked=true;
@@ -252,23 +235,14 @@ function processFrame(now, metadata){
     lastPos={x:currentX,y:currentY};
     lastTime=metadata.mediaTime;
 
-    // Görselleştirme
-    ctx.strokeStyle="lime";
-    ctx.lineWidth=2;
+    ctx.strokeStyle="#00ff00"; // Yeşil halka
+    ctx.lineWidth=3;
     ctx.beginPath();
     ctx.arc(currentX, currentY, 20, 0, Math.PI*2);
     ctx.stroke();
-    
-    // Merkez noktası
-    ctx.fillStyle="lime";
-    ctx.fillRect(currentX-2, currentY-2, 4, 4);
-  } else {
-      // Top kaybedilirse lastPos'u hemen sıfırlama, belki bir frame atlamıştır.
-      // Ancak çok uzun süre bulunamazsa sıfırlanabilir.
   }
 
   if(locked) calculatePhysics();
-  
   video.requestVideoFrameCallback(processFrame);
 }
 
@@ -276,37 +250,28 @@ function calculatePhysics(){
   let measured=launchSpeed;
   let rpm=parseFloat(document.getElementById("rpm").value)||0;
   let angleDeg=parseFloat(document.getElementById("angle").value)||0;
-
-  let wheelRadius=0.05; // 5cm tekerlek varsayılanı (Robotlar için genelde 3-5cm arasıdır)
+  let wheelRadius=0.05; 
   let wheelSpeed=2*Math.PI*wheelRadius*(rpm/60);
   let efficiency= wheelSpeed>0 ? (measured/wheelSpeed)*100 : 0;
-
-  let ballRadius=0.07; // 14cm çaplı top (standart robot yarışmaları)
-  let ballMass=0.27; // kg
+  let ballRadius=0.07; 
+  let ballMass=0.27; 
   let airDensity=1.225;
-
-  let omega=2*Math.PI*(rpm/60); // Basitleştirilmiş: Topun tekerlek hızıyla döndüğünü varsayıyoruz
+  let omega=2*Math.PI*(rpm/60); 
   let spinRatio = measured>0 ? (omega*ballRadius)/measured : 0;
-  
-  // Basit Magnus Yaklaşımı
   let C_L = Math.min(1.5 * spinRatio, 1.2); 
-
   let area = Math.PI*ballRadius*ballRadius;
   let magnusForce = 0.5*airDensity*area*measured*measured*C_L;
   let magnusAccel = ballMass>0 ? magnusForce/ballMass : 0;
-
-  // Backspin yerçekimini yener
   let effectiveG = 9.81 - magnusAccel;
 
   document.getElementById("results").innerHTML=
   `<strong>Measured Speed:</strong> ${measured.toFixed(2)} m/s<br>
-   <strong>Wheel Surface Speed:</strong> ${wheelSpeed.toFixed(2)} m/s<br>
+   <strong>Wheel Speed:</strong> ${wheelSpeed.toFixed(2)} m/s<br>
    <strong>Efficiency:</strong> ${efficiency.toFixed(1)} %<br>
    <hr>
-   <strong>Launch Angle:</strong> ${angleDeg}°<br>
-   <strong>Est. Lift Force:</strong> ${magnusForce.toFixed(2)} N<br>
-   <strong>Effective Gravity:</strong> ${effectiveG.toFixed(2)} m/s²<br>
-   <span style="color:${effectiveG<9.81?'lime':'red'}">${effectiveG<9.81?"Lift (Backspin) Detected ✈️":"No Lift / Topspin ⬇️"}</span>`;
+   <strong>Magnus Accel:</strong> ${magnusAccel.toFixed(2)} m/s²<br>
+   <strong>Eff. Gravity:</strong> ${effectiveG.toFixed(2)} m/s²<br>
+   <span style="color:${effectiveG<9.81?'lime':'red'}">${effectiveG<9.81?"LIFT ✈️":"DROP ⬇️"}</span>`;
 }
 
 function rgbToHsv(r,g,b){
@@ -328,6 +293,3 @@ function rgbToHsv(r,g,b){
   return [h*360,s*255,v*255];
 }
 </script>
-
-</body>
-</html>
