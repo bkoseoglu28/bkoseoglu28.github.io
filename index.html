@@ -2,394 +2,342 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Robot Shot Analyzer - Motion+Color Engine</title>
+<title>Robot Shot Analyzer - Ultimate</title>
 <style>
-body { background:#0f0f0f; color:#eee; font-family:'Segoe UI', sans-serif; text-align:center; margin:0; overflow:hidden; }
+  body { background:#111; color:#eee; font-family:sans-serif; text-align:center; margin:0; overflow:hidden; }
+  
+  /* Alt Kontrol Paneli */
+  #controls {
+    position: absolute; bottom: 0; left: 0; width: 100%; height: 140px;
+    background: #222; border-top: 1px solid #444; z-index: 100;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    gap: 10px; padding-bottom: 10px;
+  }
+  
+  .row { display: flex; gap: 15px; align-items: center; width: 90%; justify-content: center; }
+  
+  /* Slider */
+  input[type="range"]#seekBar { width: 100%; cursor: pointer; accent-color: #0984e3; height: 5px; }
+  
+  /* Inputs & Buttons */
+  input[type="number"] { width: 50px; background: #333; color: white; border: 1px solid #555; padding: 5px; text-align: center; }
+  
+  button { 
+    padding: 8px 15px; cursor: pointer; background: #333; color: white; border: 1px solid #555; 
+    border-radius: 4px; font-weight: bold; min-width: 100px;
+  }
+  button:hover { background: #555; }
+  button.active { background: #e17055; border-color: red; }
+  button.green { background: #00b894; border: none; color: black; box-shadow: 0 0 10px #00b894; }
 
-/* Arayüz */
-#controls {
-  position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
-  z-index: 10; background: rgba(0, 0, 0, 0.8); padding: 10px 20px;
-  border-radius: 12px; border: 1px solid #333; display: flex; gap: 10px; align-items: center;
-  backdrop-filter: blur(5px);
-}
+  /* Video Alanı */
+  #stage { position: absolute; top: 0; left: 0; width: 100%; height: calc(100vh - 140px); background: black; display: flex; justify-content: center; align-items: center; }
+  video { max-width: 100%; max-height: 100%; display: block; }
+  canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: auto; }
 
-.input-group { display: flex; flex-direction: column; font-size: 11px; color: #aaa; text-align: left; }
-input[type="number"] { width: 50px; background: #222; border: 1px solid #444; color: white; padding: 4px; border-radius: 4px; }
-input[type="range"] { width: 80px; accent-color: #00cec9; }
-
-button {
-  padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer;
-  font-weight: bold; font-size: 12px; transition: 0.2s; color: white; background: #333;
-}
-button:hover { background: #555; }
-button.primary { background: #0984e3; }
-button.danger { background: #d63031; }
-button.active { background: #00b894; color: black; box-shadow: 0 0 10px #00b894; }
-
-/* Video Alanı */
-#container { position: relative; width: 100vw; height: 100vh; display: flex; justify-content: center; align-items: center; background: #000; }
-video { max-width: 100%; max-height: 100%; display: block; }
-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
-
-/* Debug View (Siyah Beyaz Ekran) */
-#debugCanvas {
-  position: absolute; bottom: 10px; right: 10px; width: 200px; height: auto;
-  border: 2px solid #00cec9; background: black; z-index: 20; display: none;
-}
-#results {
-  position: absolute; bottom: 20px; left: 20px; text-align: left;
-  background: rgba(0,0,0,0.7); padding: 15px; border-radius: 8px; border-left: 4px solid #0984e3;
-  font-family: monospace; font-size: 14px; pointer-events: none;
-}
+  #info { 
+    position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); 
+    padding: 10px; border-radius: 5px; pointer-events: none; text-align: left;
+  }
 </style>
 </head>
 <body>
 
-<div id="controls">
-  <input type="file" id="vidUpload" accept="video/*" style="display:none">
-  <button onclick="document.getElementById('vidUpload').click()">📂 Video Aç</button>
-  
-  <div class="input-group">
-    <label>Çubuk (m)</label>
-    <input type="number" id="rodLen" value="0.5" step="0.05">
-  </div>
-  
-  <button id="btnCalib" onclick="setMode('CALIBRATE')">📏 1. Kalibre</button>
-  <button id="btnSelect" onclick="setMode('SELECT')">🎯 2. Topu Seç</button>
-  <button id="btnTrack" class="primary" onclick="toggleTracking()">▶ BAŞLAT</button>
-  
-  <div class="input-group" style="margin-left:10px">
-    <label>Hareket Eşiği</label>
-    <input type="range" id="motionThresh" min="5" max="100" value="25" oninput="updateDebug()">
-  </div>
-  
-  <label style="font-size:12px; display:flex; align-items:center; gap:5px; cursor:pointer">
-    <input type="checkbox" id="chkDebug" onchange="toggleDebugView()"> 👁️ Matrix Modu
-  </label>
+<div id="stage">
+  <video id="video" playsinline muted></video>
+  <canvas id="canvas"></canvas>
+  <div id="info">Durum: Video Yükle...</div>
 </div>
 
-<div id="container">
-  <video id="video" playsinline muted onloadedmetadata="resizeCanvas()"></video>
-  <canvas id="canvas"></canvas> </div>
+<div id="controls">
+  <div class="row" style="width: 95%;">
+    <span style="font-size:12px">Frame:</span>
+    <button onclick="seek(-0.03)" style="min-width:40px">⏪</button>
+    <input type="range" id="seekBar" value="0" step="0.001" oninput="manualSeek()">
+    <button onclick="seek(0.03)" style="min-width:40px">⏩</button>
+  </div>
 
-<canvas id="debugCanvas"></canvas>
+  <div class="row">
+    <input type="file" id="up" accept="video/*" style="width:180px">
+    <span>Çubuk (m): <input type="number" id="rod" value="0.5" step="0.05"></span>
+    <span title="Düşük=Hassas, Yüksek=Kaba">Hassasiyet: <input type="number" id="sens" value="25"></span>
+  </div>
 
-<div id="results">
-  Hız: -- m/s<br>Durum: Bekleniyor...
+  <div class="row">
+    <button onclick="setMode('CALIB')" id="bCalib">1. Kalibre</button>
+    <button onclick="setMode('SELECT')" id="bSel">2. Hedef Seç</button>
+    <button onclick="toggleRun()" id="bRun" class="green">3. BAŞLAT</button>
+    <button onclick="reset()" style="background:#d63031; border:none;">Sıfırla</button>
+  </div>
 </div>
 
 <script>
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
-const debugCanvas = document.getElementById("debugCanvas");
-const dCtx = debugCanvas.getContext("2d", { willReadFrequently: true });
+const ctx = canvas.getContext("2d", { willReadFrequently: true });
+const seekBar = document.getElementById("seekBar");
+const info = document.getElementById("info");
 
-// SİSTEM DURUMLARI
-let mode = "IDLE"; // IDLE, CALIBRATE, SELECT, TRACKING
-let scale = 0; // px to meter
+// DURUMLAR
+let mode = "IDLE"; 
+let scale = 0; // px -> metre
+let running = false;
 
-// TAKİP VERİLERİ
-let targetColor = { r:0, g:0, b:0 }; // Hedef Rengi
-let targetHSV = { h:0, s:0, v:0 };
-let lastPos = null;   // Son bilinen konum
-let searchBox = 150;  // Arama penceresi boyutu
-let prevFrame = null; // Bir önceki kare (Hareket algılama için)
+// TRACKING
+let targetHSV = {h:0, s:0, v:0};
+let lastPos = null;
+let lastTime = 0;
+let prevFrameData = null; // Hareket algılama için hafıza
 
-// FİZİK SONUÇLARI
+// FİZİK
 let speeds = [];
-let finalSpeed = 0;
 
-// -- BAŞLANGIÇ --
-document.getElementById("vidUpload").onchange = e => {
-  if(e.target.files[0]){
+// -- VİDEO YÖNETİMİ --
+document.getElementById("up").onchange = e => {
+  if(e.target.files[0]) {
     video.src = URL.createObjectURL(e.target.files[0]);
     reset();
   }
 };
 
-function resizeCanvas(){
+video.onloadedmetadata = () => {
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
-  debugCanvas.width = video.videoWidth / 4; // Küçük önizleme
-  debugCanvas.height = video.videoHeight / 4;
-  
-  // Ekrana sığdır
-  const scale = Math.min(window.innerWidth / video.videoWidth, window.innerHeight / video.videoHeight);
-  video.style.width = (video.videoWidth * scale) + "px";
-  video.style.height = (video.videoHeight * scale) + "px";
-  canvas.style.width = video.style.width;
-  canvas.style.height = video.style.height;
+  seekBar.max = video.duration;
+  resize();
+};
+
+window.onresize = resize;
+function resize(){
+  // Canvas'ı videonun ekrandaki boyutuna eşitle (Tıklama koordinatları için önemli)
+  // Basit tutmak için CSS ile hallediyoruz, burası sadece tetikleyici.
 }
 
-function reset(){
-  mode = "IDLE";
-  speeds = [];
-  lastPos = null;
-  prevFrame = null;
-  document.getElementById("btnTrack").innerText = "▶ BAŞLAT";
-  document.getElementById("btnTrack").classList.remove("danger");
+video.ontimeupdate = () => {
+  if(!running) seekBar.value = video.currentTime;
+};
+
+function manualSeek(){
+  video.currentTime = seekBar.value;
+  stopRun(); // Elle sarınca takibi durdur
+  drawFrame(); // O kareyi göster
+}
+
+function seek(dt){
+  video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + dt));
+  stopRun();
+  setTimeout(drawFrame, 50); // Video update beklet
+}
+
+function drawFrame(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
+  // Video zaten arkada oynuyor, canvas sadece çizimler için
+  if(lastPos) {
+      ctx.strokeStyle="lime"; ctx.lineWidth=2; 
+      ctx.strokeRect(lastPos.x-20, lastPos.y-20, 40, 40);
+  }
 }
 
+// -- ETKİLEŞİM --
 function setMode(m){
   mode = m;
-  if(m === 'CALIBRATE') alert("Videoyu çubuğun net olduğu yere getir ve iki ucuna tıkla.");
-  if(m === 'SELECT') alert("Videoyu TOPUN havada olduğu yere getir ve topun MERKEZİNE tıkla.");
-  
-  // Buton stilleri
-  document.querySelectorAll("button").forEach(b => b.classList.remove("active"));
-  if(m==='CALIBRATE') document.getElementById("btnCalib").classList.add("active");
-  if(m==='SELECT') document.getElementById("btnSelect").classList.add("active");
+  stopRun();
+  updateButtons();
+  if(m==='CALIB') info.innerHTML = "Çubuğun iki ucuna tıkla.";
+  if(m==='SELECT') info.innerHTML = "Videoyu kaydır, topun olduğu kareye gel ve topa tıkla.";
 }
 
-// -- TIKLAMA İŞLEYİCİSİ --
-// Hem kalibrasyon hem hedef seçimi için tek olay dinleyici
-// Canvas pointer-events:none olduğu için video üzerine bir katman ekleyip tıklamayı oradan alıyoruz
-// Basitlik için doğrudan window click kullanıp koordinat dönüşümü yapalım:
-
-window.onclick = e => {
-  if(e.target.tagName !== "VIDEO" && e.target.id !== "canvas") return; // Sadece videoya tıklayınca
-  
-  const rect = video.getBoundingClientRect();
+// Tıklama Koordinat Dönüşümü
+canvas.onmousedown = e => {
+  const rect = video.getBoundingClientRect(); // Videonun ekrandaki boyutu
   const scaleX = video.videoWidth / rect.width;
   const scaleY = video.videoHeight / rect.height;
   
-  const realX = (e.clientX - rect.left) * scaleX;
-  const realY = (e.clientY - rect.top) * scaleY;
+  // Tıklanan yerin videodaki gerçek piksel karşılığı
+  const x = (e.clientX - rect.left) * scaleX;
+  const y = (e.clientY - rect.top) * scaleY;
   
-  if(mode === "CALIBRATE") handleCalibration(realX, realY);
-  if(mode === "SELECT") handleSelection(realX, realY);
+  if(mode === 'CALIB') doCalib(x, y);
+  if(mode === 'SELECT') doSelect(x, y);
 };
 
-let calibPoints = [];
-function handleCalibration(x, y){
-  calibPoints.push({x, y});
+let calibPts = [];
+function doCalib(x, y){
+  calibPts.push({x,y});
+  ctx.fillStyle="cyan"; ctx.beginPath(); ctx.arc(x,y,5,0,Math.PI*2); ctx.fill();
   
-  // Görselleştir
-  ctx.fillStyle = "#00cec9";
-  ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI*2); ctx.fill();
-  
-  if(calibPoints.length === 2){
-    let dist = Math.hypot(calibPoints[1].x - calibPoints[0].x, calibPoints[1].y - calibPoints[0].y);
-    let realLen = parseFloat(document.getElementById("rodLen").value);
-    scale = realLen / dist;
-    
-    ctx.strokeStyle = "#00cec9"; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.moveTo(calibPoints[0].x, calibPoints[0].y); ctx.lineTo(calibPoints[1].x, calibPoints[1].y); ctx.stroke();
-    
-    alert(`Kalibrasyon Tamam: 1px = ${(scale*1000).toFixed(1)}mm`);
-    calibPoints = [];
+  if(calibPts.length === 2){
+    let dist = Math.hypot(calibPts[1].x - calibPts[0].x, calibPts[1].y - calibPts[0].y);
+    let real = parseFloat(document.getElementById("rod").value);
+    scale = real / dist;
+    info.innerHTML = `Kalibre: 1m = ${(1/scale).toFixed(0)}px. Şimdi Hedef Seç.`;
+    calibPts = [];
     mode = "IDLE";
-    document.getElementById("btnCalib").classList.remove("active");
+    updateButtons();
   }
 }
 
-function handleSelection(x, y){
-  // 1. Rengi Al
-  const tempCtx = document.createElement("canvas").getContext("2d");
-  tempCtx.drawImage(video, 0, 0); // O anki kareyi al
-  const p = tempCtx.getImageData(x, y, 1, 1).data;
+function doSelect(x, y){
+  // O anki kareden rengi al
+  const tempC = document.createElement("canvas");
+  tempC.width = video.videoWidth; tempC.height = video.videoHeight;
+  const tCtx = tempC.getContext("2d");
+  tCtx.drawImage(video, 0, 0);
+  const p = tCtx.getImageData(x, y, 1, 1).data;
   
-  targetColor = { r:p[0], g:p[1], b:p[2] };
   targetHSV = rgbToHsv(p[0], p[1], p[2]);
+  lastPos = {x, y};
   
-  // 2. Konumu Kaydet
-  lastPos = { x, y };
-  
-  // Görselleştir
-  ctx.strokeStyle = "#e17055"; ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.arc(x, y, 20, 0, Math.PI*2); ctx.stroke();
-  
-  alert("Top Kilitlendi! Sandalyeler artık sorun değil. Başlat'a bas.");
+  info.innerHTML = `Hedef Seçildi! Konum: ${x.toFixed(0)},${y.toFixed(0)}. Başlat'a bas.`;
+  drawFrame(); // Seçim karesini çiz
   mode = "READY";
-  document.getElementById("btnSelect").classList.remove("active");
+  updateButtons();
 }
 
-// -- ANA TAKİP MOTORU (TRACKING ENGINE) --
-function toggleTracking(){
-  if(mode === "TRACKING"){
-    video.pause();
-    mode = "IDLE";
-    document.getElementById("btnTrack").innerText = "▶ DEVAM ET";
-    document.getElementById("btnTrack").classList.remove("danger");
-  } else {
-    if(!lastPos) { alert("Önce Topu Seç!"); return; }
-    if(scale===0) { alert("Önce Kalibrasyon!"); return; }
-    
-    mode = "TRACKING";
-    document.getElementById("btnTrack").innerText = "⏹ DURDUR";
-    document.getElementById("btnTrack").classList.add("danger");
+// -- ÇALIŞTIRMA (Motion + Color Engine) --
+function toggleRun(){
+  if(running) stopRun();
+  else {
+    if(!lastPos) { alert("Hedef seçmedin!"); return; }
+    if(scale===0) { alert("Kalibre etmedin!"); return; }
+    running = true;
+    prevFrameData = null; // Hareket hafızasını sıfırla
     video.play();
     loop();
+    updateButtons();
   }
 }
 
-let lastTime = 0;
+function stopRun(){
+  running = false;
+  video.pause();
+  updateButtons();
+}
 
 function loop(){
-  if(mode !== "TRACKING") return;
-  if(video.paused || video.ended) return;
+  if(!running || video.paused) return;
 
-  // 1. Görüntüyü Al (Sadece Arama Penceresi - Optimizasyon)
-  // Topun 150px çevresine bakarız sadece.
-  const w = canvas.width; const h = canvas.height;
+  // 1. Görüntü Al
+  const w = canvas.width, h = canvas.height;
+  const tempC = document.createElement("canvas"); // Offscreen canvas for processing
+  tempC.width = w/4; tempC.height = h/4; // Performans için küçük işle
+  const tCtx = tempC.getContext("2d", {willReadFrequently:true});
   
-  // Ana Canvas'ı temizle
-  ctx.clearRect(0, 0, w, h);
+  tCtx.drawImage(video, 0, 0, tempC.width, tempC.height);
+  const frame = tCtx.getImageData(0,0,tempC.width,tempC.height);
+  const data = frame.data;
   
-  // Geçici canvas'a çiz (Piksel analizi için)
-  dCtx.drawImage(video, 0, 0, debugCanvas.width, debugCanvas.height);
-  
-  // Oranlama (Video -> Debug Canvas)
-  const rX = debugCanvas.width / w; 
-  const rY = debugCanvas.height / h;
-  
-  // Küçük resmin verisini al
-  const frameData = dCtx.getImageData(0, 0, debugCanvas.width, debugCanvas.height);
-  const data = frameData.data;
-  
-  // Eğer önceki kare yoksa kaydet ve çık
-  if(!prevFrame) {
-    prevFrame = new Uint8ClampedArray(data);
+  if(!prevFrameData) {
+    prevFrameData = new Uint8ClampedArray(data);
     requestAnimationFrame(loop);
     return;
   }
 
-  // ANALİZ
-  let totalX = 0, totalY = 0, count = 0;
-  const thresh = parseInt(document.getElementById("motionThresh").value);
+  // 2. Analiz (Motion + Color)
+  let sumX=0, sumY=0, count=0;
+  const thresh = parseInt(document.getElementById("sens").value);
+  const ratio = 4; // Küçültme oranı
   
-  // Arama Penceresi Sınırları (Küçük Canvas Üzerinde)
-  let searchRad = 40; // Küçük canvas üzerinde yarıçap
-  let startX = Math.max(0, Math.floor((lastPos.x * rX) - searchRad));
-  let startY = Math.max(0, Math.floor((lastPos.y * rY) - searchRad));
-  let endX = Math.min(debugCanvas.width, startX + searchRad*2);
-  let endY = Math.min(debugCanvas.height, startY + searchRad*2);
+  // Arama Penceresi (Sadece lastPos etrafı)
+  let box = 100 / ratio; 
+  let sx = Math.max(0, Math.floor((lastPos.x/ratio) - box));
+  let sy = Math.max(0, Math.floor((lastPos.y/ratio) - box));
+  let ex = Math.min(tempC.width, sx + box*2);
+  let ey = Math.min(tempC.height, sy + box*2);
 
-  // Pikselleri Tara
-  for(let y = startY; y < endY; y++){
-    for(let x = startX; x < endX; x++){
-      const i = (y * debugCanvas.width + x) * 4;
+  for(let y=sy; y<ey; y++){
+    for(let x=sx; x<ex; x++){
+      const i = (y * tempC.width + x) * 4;
       
-      const r = data[i], g = data[i+1], b = data[i+2];
+      // HAREKET KONTROLÜ (Sandalye Filtresi)
+      const diff = Math.abs(data[i]-prevFrameData[i]) + 
+                   Math.abs(data[i+1]-prevFrameData[i+1]) + 
+                   Math.abs(data[i+2]-prevFrameData[i+2]);
       
-      // 1. HAREKET FİLTRESİ (Motion Filter)
-      // Önceki kare ile şimdiki kare arasındaki fark
-      const pr = prevFrame[i], pg = prevFrame[i+1], pb = prevFrame[i+2];
-      const diff = Math.abs(r-pr) + Math.abs(g-pg) + Math.abs(b-pb);
-      
-      // Eğer değişim eşik değerinden küçükse (Sandalye duruyor), bu pikseli atla!
-      if(diff < thresh) {
-         // Debug görünümü için siyah yap
-         data[i]=0; data[i+1]=0; data[i+2]=0;
-         continue; 
-      }
-      
-      // 2. RENK FİLTRESİ (Color Filter)
-      // Sadece hareket eden piksellerde renk kontrolü yap
-      const hsv = rgbToHsv(r, g, b);
-      if(isColorMatch(hsv)){
-         totalX += x;
-         totalY += y;
-         count++;
-         
-         // Debug için beyaz yap (Bulunan pikseller)
-         data[i]=255; data[i+1]=255; data[i+2]=255;
-      } else {
-         // Hareket var ama renk tutmadı (Örn: Öğrencinin kolu) -> Gri yap
-         data[i]=50; data[i+1]=50; data[i+2]=50;
-      }
-    }
-  }
-  
-  // Bir sonraki tur için bu kareyi "önceki" yap
-  // Tüm array'i kopyalamak yerine referans tutarsak bozulur, o yüzden kopyalıyoruz
-  // Ama performans için sadece ilgili bölgeyi kopyalamak daha iyi olurdu, şimdilik basit tutalım.
-  // Not: Uint8ClampedArray kopyalaması tarayıcıda çok hızlıdır.
-  prevFrame.set(frameData.data); 
-  
-  // Debug görüntüsünü güncelle
-  if(document.getElementById("chkDebug").checked){
-      dCtx.putImageData(frameData, 0, 0);
-  }
-
-  // FİZİK HESABI
-  if(count > 5) { // En az 5 piksel bulduysak
-    // Küçük canvastaki koordinatı ana videoya geri çevir
-    const foundX = (totalX / count) / rX;
-    const foundY = (totalY / count) / rY;
-    
-    // Hız Hesapla
-    const dt = (video.currentTime - lastTime);
-    if(dt > 0 && dt < 0.1){ // Çok uzun süre geçmişse (takılma) hesaplama
-        const dist = Math.hypot(foundX - lastPos.x, foundY - lastPos.y);
-        const speed = (dist * scale) / dt;
+      if(diff > thresh){ // Sadece hareket edenler
         
-        if(speed > 0.5 && speed < 30) { // Filtre: Çok yavaş veya ışık hızı değilse
-            speeds.push(speed);
-            // Son 5 karenin ortalamasını al (Smoothing)
-            if(speeds.length > 5) speeds.shift();
-            finalSpeed = speeds.reduce((a,b)=>a+b)/speeds.length;
-            
-            document.getElementById("results").innerHTML = 
-              `Hız: <b>${finalSpeed.toFixed(2)}</b> m/s<br>Dist: ${(dist*scale).toFixed(2)}m`;
+        // RENK KONTROLÜ
+        const hsv = rgbToHsv(data[i], data[i+1], data[i+2]);
+        if(isMatch(hsv)){
+          sumX += x; sumY += y; count++;
         }
+      }
+    }
+  }
+
+  // Hafızayı güncelle
+  prevFrameData.set(data);
+
+  // 3. Sonuç
+  ctx.clearRect(0,0,w,h);
+  
+  if(count > 2){
+    let curX = (sumX / count) * ratio;
+    let curY = (sumY / count) * ratio;
+    
+    // Hız
+    let dt = video.currentTime - lastTime;
+    if(dt>0 && dt<0.1){
+      let dist = Math.hypot(curX-lastPos.x, curY-lastPos.y);
+      let v = (dist * scale) / dt;
+      if(v > 0.5 && v < 25) {
+        info.innerHTML = `<b style='color:lime; font-size:20px'>Hız: ${v.toFixed(2)} m/s</b>`;
+        speeds.push(v);
+      }
     }
     
-    // Yeni konum (Tahmin eklemiyorum, direkt ölçüm)
-    lastPos = { x: foundX, y: foundY };
+    lastPos = {x:curX, y:curY};
     lastTime = video.currentTime;
-    
-    // Çiz
-    ctx.strokeStyle = "#00cec9";
-    ctx.lineWidth = 4;
-    ctx.beginPath(); ctx.arc(lastPos.x, lastPos.y, 25, 0, Math.PI*2); ctx.stroke();
+
+    // Görsel
+    ctx.strokeStyle="#00cec9"; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.arc(curX, curY, 25, 0, Math.PI*2); ctx.stroke();
   } else {
-      // Topu kaybettik! Arama alanını genişlet
-      // Ama lastPos'u değiştirme, belki top oraya geri gelir
-      ctx.strokeStyle = "red";
-      ctx.strokeRect(lastPos.x - 50, lastPos.y - 50, 100, 100);
+    // Kaybolursa pencereyi çiz (debug)
+    ctx.strokeStyle="red"; ctx.strokeRect(lastPos.x-50, lastPos.y-50, 100, 100);
   }
-  
+
   requestAnimationFrame(loop);
 }
 
-// -- YARDIMCILAR --
-function isColorMatch(hsv){
-    // Hedef renge tolerans uygula
-    // Hue: Renk tonu (Dairesel fark)
-    let hDiff = Math.abs(hsv.h - targetHSV.h);
-    if(hDiff > 180) hDiff = 360 - hDiff;
-    
-    // Turuncu/Kırmızı tonları hassastır, toleransı düşük tut
-    // Value (Parlaklık) çok değişebilir, toleransı yüksek tut
-    return hDiff < 20 && hsv.s > 40 && hsv.v > 40;
+// -- YARDIMCI --
+function isMatch(h){
+  let hd = Math.abs(h.h - targetHSV.h);
+  if(hd > 180) hd = 360 - hd;
+  // Düşük tolerans (sandalye kırmızı/turuncu karışmasın diye)
+  return hd < 20 && h.s > 40 && h.v > 40;
 }
 
-function rgbToHsv(r, g, b) {
-    r /= 255, g /= 255, b /= 255;
-    var max = Math.max(r, g, b), min = Math.min(r, g, b);
-    var h, s, v = max;
-    var d = max - min;
-    s = max == 0 ? 0 : d / max;
-    if (max == min) { h = 0; } else {
-        switch (max) {
-            case r: h = (g - b) / d + (g < b ? 6 : 0); break;
-            case g: h = (b - r) / d + 2; break;
-            case b: h = (r - g) / d + 4; break;
-        }
-        h /= 6;
+function rgbToHsv(r,g,b){
+  r/=255; g/=255; b/=255;
+  let max=Math.max(r,g,b), min=Math.min(r,g,b);
+  let h,s,v=max, d=max-min;
+  s=max==0?0:d/max;
+  if(max==min)h=0;
+  else{
+    switch(max){
+      case r:h=(g-b)/d+(g<b?6:0);break;
+      case g:h=(b-r)/d+2;break;
+      case b:h=(r-g)/d+4;break;
     }
-    return { h: h * 360, s: s * 100, v: v * 100 };
+    h/=6;
+  }
+  return {h:h*360, s:s*100, v:v*100};
 }
 
-function toggleDebugView(){
-    const chk = document.getElementById("chkDebug");
-    debugCanvas.style.display = chk.checked ? "block" : "none";
+function reset(){
+  stopRun();
+  mode="IDLE"; lastPos=null; speeds=[];
+  updateButtons();
+  info.innerHTML = "Sıfırlandı.";
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+}
+
+function updateButtons(){
+  document.getElementById("bCalib").className = mode==="CALIB"?"active":"";
+  document.getElementById("bSel").className = mode==="SELECT"?"active":"";
+  document.getElementById("bRun").innerText = running ? "DURDUR" : "3. BAŞLAT";
 }
 </script>
-
 </body>
 </html>
