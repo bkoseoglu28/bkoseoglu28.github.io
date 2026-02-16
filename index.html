@@ -2,49 +2,61 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Robot Shot Analyzer - Manual Mask</title>
+<title>Robot Shot Analyzer - Frame Control</title>
 <style>
-body { background:#111; color:white; font-family:Arial, sans-serif; text-align:center; }
-.container{
-  position: relative;
-  display:inline-block;
-  margin-top:10px;
-}
-video { display:block; max-width:80vw; height:auto; border:1px solid #555; }
+body { background:#111; color:#eee; font-family:Arial, sans-serif; text-align:center; user-select:none; }
+.container { position: relative; display:inline-block; margin-top:10px; border:1px solid #555; }
+video { display:block; max-width:80vw; max-height:70vh; }
 canvas { position:absolute; top:0; left:0; width:100%; height:100%; cursor:crosshair; }
-input{ width:70px; background:#222; color:white; border:1px solid #444; padding:5px; }
-button{ 
-  margin:5px; padding:8px 15px; cursor:pointer; 
-  background:#333; color:white; border:1px solid #555; font-size:14px; 
-}
-button:hover{ background:#555; }
-button.active{ background:#d63031; border-color:red; }
-button.green{ background:#00b894; border:none; color:black; font-weight:bold; }
 
-#results { 
-  background:#222; padding:15px; margin-top:10px; 
-  border:1px solid #444; display:inline-block; text-align:left; min-width:250px; 
+/* Kontrol Paneli Tasarımı */
+.panel { background:#222; padding:15px; margin:10px auto; width:90%; max-width:800px; border-radius:8px; border:1px solid #444; }
+.row { display:flex; justify-content:center; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+
+input[type="number"] { width:60px; background:#333; color:white; border:1px solid #555; padding:5px; text-align:center; }
+input[type="file"] { color:#ccc; }
+
+/* Slider (Video Çubuğu) */
+input[type="range"] { width: 100%; cursor: pointer; accent-color: #0984e3; }
+
+button { 
+  padding:8px 16px; cursor:pointer; background:#333; color:white; 
+  border:1px solid #555; font-weight:bold; border-radius:4px;
 }
+button:hover { background:#555; }
+button.active { background:#e17055; border-color:red; color:white; }
+button.green { background:#00b894; border:none; color:black; }
+
+#results { background:#222; padding:15px; border:1px solid #444; display:inline-block; min-width:300px; margin-top:10px; }
 </style>
 </head>
 <body>
 
-<h2>Robot Shot Analyzer (Manuel Maskeleme)</h2>
+<h2>Robot Shot Analyzer (Frame Kontrollü)</h2>
 
-<div style="margin-bottom:15px;">
-  <input type="file" id="videoUpload" accept="video/*"><br><br>
-  
-  Çubuk (m): <input type="number" id="rodLength" step="0.01" value="0.5">
-  Açı: <input type="number" id="angle" value="45">
-  Hassasiyet: <input type="number" id="sensitivity" value="30" title="Düşük=Hassas, Yüksek=Kaba">
-</div>
+<div class="panel">
+  <div class="row">
+    <input type="file" id="videoUpload" accept="video/*">
+  </div>
 
-<div>
-  <button onclick="calibrate()">1. Kalibre Et</button>
-  <button onclick="toggleHSV()">2. Renk Seç</button>
-  <button onclick="toggleMasking()" id="btnMask">3. Yasak Bölge Çiz</button>
-  <button onclick="clearMasks()">Maskeleri Sil</button>
-  <button class="green" onclick="toggleTracking()" id="btnTrack">BAŞLAT / DURDUR</button>
+  <div class="row">
+    <button onclick="moveFrame(-0.05)">⏪ Geri</button>
+    <input type="range" id="seekBar" value="0" step="0.001">
+    <button onclick="moveFrame(0.05)">İleri ⏩</button>
+  </div>
+
+  <div class="row">
+    <span>Çubuk (m): <input type="number" id="rodLength" step="0.01" value="0.5"></span>
+    <span>RPM: <input type="number" id="rpm" value="3000"></span>
+    <span>Açı: <input type="number" id="angle" value="45"></span>
+  </div>
+
+  <div class="row">
+    <button onclick="startCalibration()" id="btnCalib">1. Kalibre Et</button>
+    <button onclick="startTargetSelection()" id="btnTarget">2. Hedef Seç (Top)</button>
+    <button class="green" onclick="runTracking()" id="btnTrack">3. BAŞLAT</button>
+    <button onclick="resetAll()">Sıfırla</button>
+  </div>
 </div>
 
 <div class="container">
@@ -52,55 +64,58 @@ button.green{ background:#00b894; border:none; color:black; font-weight:bold; }
   <canvas id="canvas"></canvas>
 </div>
 
-<div id="results">Hazır...</div>
+<div id="results">Veri bekleniyor...</div>
 
 <script>
-const video=document.getElementById("video");
-const canvas=document.getElementById("canvas");
-const ctx=canvas.getContext("2d", { willReadFrequently: true });
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d", { willReadFrequently: true });
+const seekBar = document.getElementById("seekBar");
 
-// SİSTEM DEĞİŞKENLERİ
-let scale=0;
-let tracking=false;
-let hsv={hMin:0,hMax:0,sMin:50,vMin:50};
+// SİSTEM DURUMLARI
+let state = "IDLE"; // IDLE, CALIBRATING, SELECTING_TARGET, TRACKING
+let scale = 0;      // Pixel to Meter
 
-// MASKELEME (YASAK BÖLGELER)
-let ignoreZones = []; // {x, y, w, h}
-let isDrawingMask = false;
-let maskStart = null;
+// HEDEF VERİLERİ
+let targetColor = { r:0, g:0, b:0 }; // Seçilen renk
+let targetHSV = { h:0, s:0, v:0 };   // Seçilen HSV
+let lastPos = null;                  // Topun son konumu
+let searchWindow = 100;              // Sadece topun etrafındaki 100px'i tara
 
-// HAREKET ALGILAMA
-let previousFrameData = null;
-let lastPos=null;
-let lastTime=null;
-let captureFrames=[];
-let capturing=false;
-let locked=false;
-let launchSpeed=0;
+// FİZİK HESAPLAMA
+let captureFrames = [];
+let locked = false;
+let launchSpeed = 0;
+let lastTime = 0;
 
-// DOSYA YÜKLEME
-document.getElementById("videoUpload").onchange=e=>{
+// --- VİDEO YÖNETİMİ ---
+document.getElementById("videoUpload").onchange = e => {
   if(e.target.files[0]){
-    video.src=URL.createObjectURL(e.target.files[0]);
-    resetSystem();
+    video.src = URL.createObjectURL(e.target.files[0]);
+    resetAll();
   }
 };
 
-video.onloadedmetadata=()=>{
-  canvas.width=video.videoWidth;
-  canvas.height=video.videoHeight;
-  drawOverlay();
+video.onloadedmetadata = () => {
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  seekBar.max = video.duration;
+  drawUI();
 };
 
-function resetSystem(){
-  tracking=false;
-  locked=false;
-  launchSpeed=0;
-  captureFrames=[];
-  lastPos=null;
-  previousFrameData=null;
-  document.getElementById("results").innerHTML = "Video Yüklendi.";
-  drawOverlay();
+video.ontimeupdate = () => {
+  seekBar.value = video.currentTime;
+  if(state !== "TRACKING") drawUI(); // Videoyu elle kaydırırken overlay çiz
+};
+
+seekBar.oninput = () => {
+  video.currentTime = seekBar.value;
+  // Manuel kaydırmada takibi durdur
+  if(state === "TRACKING") stopTracking();
+};
+
+function moveFrame(delta){
+  video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + delta));
 }
 
 function getMousePos(evt){
@@ -112,269 +127,241 @@ function getMousePos(evt){
 }
 
 // --- 1. KALİBRASYON ---
-function calibrate(){
-  video.pause();
-  let points=[];
-  alert("Çubuğun iki ucuna tıkla");
+let calibPoints = [];
+function startCalibration(){
+  state = "CALIBRATING";
+  calibPoints = [];
+  alert("Videonun kaydırma çubuğunu kullanarak ÇUBUĞUN en net olduğu kareye gel.\nSonra çubuğun iki ucuna tıkla.");
+  updateButtons();
   
   canvas.onmousedown = e => {
-    points.push(getMousePos(e));
-    drawOverlay(points); // Noktaları göster
+    if(state !== "CALIBRATING") return;
+    calibPoints.push(getMousePos(e));
+    drawUI();
     
-    if(points.length==2){
+    if(calibPoints.length === 2){
       let rodLen = parseFloat(document.getElementById("rodLength").value);
-      let dist = Math.hypot(points[1].x-points[0].x, points[1].y-points[0].y);
-      if(dist>0) {
-        scale = rodLen/dist;
+      let dist = Math.hypot(calibPoints[1].x - calibPoints[0].x, calibPoints[1].y - calibPoints[0].y);
+      if(dist > 0){
+        scale = rodLen / dist;
         alert("Kalibrasyon Tamam!");
+        state = "IDLE";
+        canvas.onmousedown = null;
+        updateButtons();
       }
-      canvas.onmousedown = null;
-      drawOverlay();
     }
   };
 }
 
-// --- 2. RENK SEÇİMİ ---
-function toggleHSV(){
-  video.pause();
-  alert("Topun üzerine tıkla");
+// --- 2. HEDEF SEÇİMİ (TIKLA VE KİLİTLE) ---
+function startTargetSelection(){
+  if(scale === 0){ alert("Önce Kalibrasyon!"); return; }
+  state = "SELECTING_TARGET";
+  alert("Videoyu kaydırarak TOPUN havada net olduğu bir ana gel.\nSonra tam topun merkezine tıkla.");
+  updateButtons();
+
   canvas.onmousedown = e => {
+    if(state !== "SELECTING_TARGET") return;
     let p = getMousePos(e);
-    let d = ctx.getImageData(p.x, p.y, 1, 1).data;
-    let val = rgbToHsv(d[0],d[1],d[2]);
     
-    hsv.hMin = (val[0]-15+360)%360;
-    hsv.hMax = (val[0]+15)%360;
-    hsv.sMin = Math.max(20, val[1]-60);
-    hsv.vMin = Math.max(20, val[2]-60);
+    // Rengi al (5x5 ortalama)
+    let imgData = ctx.getImageData(p.x-2, p.y-2, 5, 5).data;
+    let r=0, g=0, b=0, count=0;
+    for(let i=0; i<imgData.length; i+=4){
+        r+=imgData[i]; g+=imgData[i+1]; b+=imgData[i+2]; count++;
+    }
+    targetColor = { r:r/count, g:g/count, b:b/count };
+    targetHSV = rgbToHsv(targetColor.r, targetColor.g, targetColor.b);
     
-    alert("Renk Kaydedildi.");
+    // Başlangıç konumunu ayarla
+    lastPos = { x: p.x, y: p.y };
+    
+    alert("Top Kilitlendi! 'Başlat'a basınca buradan itibaren takip edecek.");
+    state = "READY_TO_TRACK";
     canvas.onmousedown = null;
+    drawUI();
+    updateButtons();
   };
 }
 
-// --- 3. MASKELEME (KUTU ÇİZME) ---
-function toggleMasking(){
-  video.pause();
-  isDrawingMask = !isDrawingMask;
-  let btn = document.getElementById("btnMask");
+// --- 3. TAKİP (TRACKING LOOP) ---
+function runTracking(){
+  if(state !== "READY_TO_TRACK"){ alert("Önce Hedef Seç!"); return; }
   
-  if(isDrawingMask){
-    btn.classList.add("active");
-    btn.innerText = "Çizimi Bitir";
-    alert("Yasaklamak istediğin alanlara kutu çiz ve bırak.");
-    
-    canvas.onmousedown = e => { maskStart = getMousePos(e); };
-    canvas.onmouseup = e => {
-      if(maskStart){
-        let end = getMousePos(e);
-        let w = end.x - maskStart.x;
-        let h = end.y - maskStart.y;
-        // Ters çizimi düzelt
-        if(w < 0) { maskStart.x += w; w = -w; }
-        if(h < 0) { maskStart.y += h; h = -h; }
-        
-        if(w>5 && h>5) {
-            ignoreZones.push({x: maskStart.x, y: maskStart.y, w: w, h: h});
-        }
-        maskStart = null;
-        drawOverlay();
+  state = "TRACKING";
+  updateButtons();
+  video.play();
+  lastTime = video.currentTime;
+  
+  video.requestVideoFrameCallback(trackLoop);
+}
+
+function stopTracking(){
+    state = "IDLE";
+    video.pause();
+    updateButtons();
+}
+
+function trackLoop(now, metadata){
+  if(state !== "TRACKING") return;
+
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  
+  // ARAMA PENCERESİ (Window Search)
+  // Tüm ekrana bakmıyoruz. Sadece lastPos etrafındaki kareye bakıyoruz.
+  // Bu sayede yerdeki turuncu halka arama penceresinin dışındaysa ASLA algılanmaz.
+  
+  let win = searchWindow;
+  let startX = Math.max(0, Math.floor(lastPos.x - win));
+  let startY = Math.max(0, Math.floor(lastPos.y - win));
+  let w = Math.min(canvas.width - startX, win * 2);
+  let h = Math.min(canvas.height - startY, win * 2);
+
+  // Görsel olarak arama penceresini çiz (Debug için iyi olur)
+  ctx.strokeStyle = "rgba(0, 255, 255, 0.3)";
+  ctx.strokeRect(startX, startY, w, h);
+
+  let imgData = ctx.getImageData(startX, startY, w, h);
+  let data = imgData.data;
+
+  let totalX = 0, totalY = 0, count = 0;
+
+  for(let y=0; y<h; y+=2){
+    for(let x=0; x<w; x+=2){
+      let i = (y * w + x) * 4;
+      let r = data[i], g = data[i+1], b = data[i+2];
+
+      // Renk Eşleşmesi
+      if(isColorMatch(r, g, b)){
+        totalX += (startX + x);
+        totalY += (startY + y);
+        count++;
       }
-    };
-    canvas.onmousemove = e => {
-        if(maskStart){
-            drawOverlay(); // Mevcut kutuları çiz
-            let cur = getMousePos(e);
-            ctx.fillStyle = "rgba(255, 0, 0, 0.5)";
-            ctx.fillRect(maskStart.x, maskStart.y, cur.x - maskStart.x, cur.y - maskStart.y);
-        }
     }
-  } else {
-    btn.classList.remove("active");
-    btn.innerText = "3. Yasak Bölge Çiz";
-    canvas.onmousedown = null;
-    canvas.onmouseup = null;
-    canvas.onmousemove = null;
-    drawOverlay();
   }
-}
 
-function clearMasks(){
-    ignoreZones = [];
-    drawOverlay();
-}
+  if(count > 5){
+    let curX = totalX / count;
+    let curY = totalY / count;
 
-// --- YARDIMCI: ÇİZİM ---
-function drawOverlay(points=[]){
-    if(tracking) return; // Takip sırasında çizme
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    
-    // Kalibrasyon noktaları
-    ctx.fillStyle="lime";
-    points.forEach(p=>{ ctx.beginPath(); ctx.arc(p.x,p.y,5,0,Math.PI*2); ctx.fill(); });
-    
-    // Yasak Bölgeler (Kırmızı Kutular)
-    ctx.fillStyle = "rgba(255, 0, 0, 0.4)";
-    ctx.strokeStyle = "red";
-    ignoreZones.forEach(z => {
-        ctx.fillRect(z.x, z.y, z.w, z.h);
-        ctx.strokeRect(z.x, z.y, z.w, z.h);
-        // Çarpı işareti
-        ctx.beginPath(); ctx.moveTo(z.x, z.y); ctx.lineTo(z.x+z.w, z.y+z.h); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(z.x+z.w, z.y); ctx.lineTo(z.x, z.y+z.h); ctx.stroke();
-    });
-}
+    // Hız Hesapla
+    let dt = metadata.mediaTime - lastTime;
+    let dist = Math.hypot(curX - lastPos.x, curY - lastPos.y);
 
-// --- ANA TAKİP ---
-function toggleTracking(){
-    if(scale===0) { alert("Kalibrasyon yapmadın!"); return; }
-    tracking = !tracking;
-    let btn = document.getElementById("btnTrack");
-    
-    if(tracking){
-        btn.innerText = "DURDUR";
-        btn.style.background = "red";
-        video.play();
-        previousFrameData = null;
-        video.requestVideoFrameCallback(processFrame);
-    } else {
-        btn.innerText = "BAŞLAT";
-        btn.style.background = "#00b894";
-        video.pause();
-        drawOverlay();
-    }
-}
-
-function processFrame(now, metadata){
-    if(!tracking) return;
-    
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    
-    // Kırmızı yasak bölgeleri çiz (görmek için)
-    ctx.fillStyle = "rgba(255, 0, 0, 0.3)";
-    ignoreZones.forEach(z => ctx.fillRect(z.x, z.y, z.w, z.h));
-
-    // Arama Penceresi Optimizasyonu
-    let startX=0, startY=0, w=canvas.width, h=canvas.height;
-    if(lastPos && !locked){
-        const win=150;
-        startX=Math.max(0, Math.floor(lastPos.x-win));
-        startY=Math.max(0, Math.floor(lastPos.y-win));
-        w=Math.min(canvas.width-startX, win*2);
-        h=Math.min(canvas.height-startY, win*2);
+    if(dt > 0 && dist > 2){
+       let speed = (dist * scale) / dt;
+       
+       // Filtrele: Çok yavaş veya saçma hızlıysa alma
+       if(!locked && speed > 0.5 && speed < 25){
+          if(captureFrames.length < 10){
+              captureFrames.push(speed);
+              // Ekrana anlık hızı yaz
+              ctx.fillStyle = "yellow";
+              ctx.font = "20px Arial";
+              ctx.fillText(speed.toFixed(2) + " m/s", curX + 20, curY);
+          } else if (!locked) {
+              // 10 kare veri toplandıysa sonucu kilitle
+              launchSpeed = captureFrames.reduce((a,b)=>a+b) / captureFrames.length;
+              locked = true;
+              showResults();
+          }
+       }
     }
 
-    let imgData = ctx.getImageData(startX, startY, w, h);
-    let data = imgData.data;
-    let thresh = parseInt(document.getElementById("sensitivity").value);
-    
-    let totalX=0, totalY=0, count=0;
+    lastPos = { x: curX, y: curY }; // Konumu güncelle
+    lastTime = metadata.mediaTime;
 
-    for(let y=0; y<h; y+=2){
-        for(let x=0; x<w; x+=2){
-            // Gerçek koordinatlar
-            let realX = startX + x;
-            let realY = startY + y;
+    // Hedefi çiz
+    ctx.strokeStyle = "#00ff00";
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(curX, curY, 20, 0, Math.PI*2); ctx.stroke();
+  } else {
+     // Top pencereden çıktıysa veya kaybolduysa pencereyi biraz büyüt ki geri bulabilsin
+     searchWindow = Math.min(300, searchWindow + 5);
+  }
 
-            // ÖNEMLİ: Eğer bu piksel yasak bölgedeyse ATLA
-            let ignored = false;
-            for(let z of ignoreZones){
-                if(realX >= z.x && realX <= z.x+z.w && realY >= z.y && realY <= z.y+z.h){
-                    ignored = true; break;
-                }
-            }
-            if(ignored) continue;
+  if(state === "TRACKING") video.requestVideoFrameCallback(trackLoop);
+}
 
-            // Renk ve Hareket Analizi
-            let i = (y*w + x)*4;
-            let r=data[i], g=data[i+1], b=data[i+2];
+// --- RENK MANTIĞI ---
+function isColorMatch(r, g, b){
+    let hsv = rgbToHsv(r, g, b);
+    let hDist = Math.abs(hsv.h - targetHSV.h);
+    if(hDist > 180) hDist = 360 - hDist; // Dairesel fark
 
-            if(Math.abs(r-g)<15 && Math.abs(g-b)<15) continue; // Gri eleme
+    // Toleranslar: Hue ±15, Saturation > 30, Value > 30
+    // Ayrıca seçilen hedefin doygunluk seviyesine yakın olmalı
+    return hDist < 15 && 
+           hsv.s > (targetHSV.s - 40) && 
+           hsv.v > (targetHSV.v - 40);
+}
 
-            let hsvVal = rgbToHsv(r,g,b);
-            if(hueMatch(hsvVal[0]) && hsvVal[1]>hsv.sMin && hsvVal[2]>hsv.vMin){
-                
-                // Hareket Kontrolü
-                let isMoving = true;
-                if(previousFrameData && previousFrameData.length === data.length){
-                    let diff = Math.abs(r-previousFrameData[i]) + Math.abs(g-previousFrameData[i+1]) + Math.abs(b-previousFrameData[i+2]);
-                    if(diff < thresh) isMoving = false;
-                }
-
-                if(isMoving){
-                    totalX += realX;
-                    totalY += realY;
-                    count++;
-                }
-            }
+function rgbToHsv(r, g, b) {
+    r/=255; g/=255; b/=255;
+    let max = Math.max(r, g, b), min = Math.min(r, g, b);
+    let h, s, v = max;
+    let d = max - min;
+    s = max === 0 ? 0 : d / max;
+    if (max === min) h = 0;
+    else {
+        switch (max) {
+            case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+            case g: h = (b - r) / d + 2; break;
+            case b: h = (r - g) / d + 4; break;
         }
+        h /= 6;
     }
-    
-    if(!lastPos) previousFrameData = new Uint8ClampedArray(data);
+    return { h: h * 360, s: s * 255, v: v * 255 };
+}
 
-    if(count > 5){
-        let curX = totalX/count;
-        let curY = totalY/count;
+// --- UI & YARDIMCILAR ---
+function drawUI(){
+  ctx.clearRect(0,0,canvas.width,canvas.height); // Önceki çizimleri sil
+  // Eğer video duruyorsa (tracker çalışmıyorsa) videoyu canvasa bas
+  if(state !== "TRACKING") ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-        if(lastPos){
-            let dist = Math.hypot(curX-lastPos.x, curY-lastPos.y);
-            if(dist > 3){ // Minik titremeleri yok say
-                let dt = metadata.mediaTime - lastTime;
-                if(dt>0){
-                    let speed = (dist * scale) / dt;
-                    if(!locked && speed>0.5 && speed<20){
-                        if(!capturing) { capturing=true; captureFrames=[]; }
-                        captureFrames.push(speed);
-                        if(captureFrames.length>=5){
-                            launchSpeed = captureFrames.reduce((a,b)=>a+b)/captureFrames.length;
-                            locked=true;
-                            showResults();
-                        }
-                    }
-                }
-                lastPos = {x:curX, y:curY};
-                lastTime = metadata.mediaTime;
-            }
-        } else {
-            lastPos = {x:curX, y:curY};
-            lastTime = metadata.mediaTime;
-        }
-
-        ctx.strokeStyle = "#00ff00";
-        ctx.lineWidth = 3;
-        ctx.beginPath(); ctx.arc(lastPos.x, lastPos.y, 20, 0, Math.PI*2); ctx.stroke();
-    }
-
-    if(!locked) video.requestVideoFrameCallback(processFrame);
+  // Kalibrasyon noktaları
+  ctx.fillStyle = "red";
+  calibPoints.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI*2); ctx.fill(); });
+  
+  // Hedef Noktası (varsa)
+  if(lastPos && state === "READY_TO_TRACK"){
+      ctx.strokeStyle = "lime";
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(lastPos.x, lastPos.y, 25, 0, Math.PI*2); ctx.stroke();
+      ctx.fillStyle = "white";
+      ctx.fillText("HEDEF", lastPos.x - 20, lastPos.y - 30);
+  }
 }
 
 function showResults(){
-    let v = launchSpeed;
-    let eff = (v / (2*Math.PI*0.05*(3000/60)))*100;
+    stopTracking();
+    let rpm = document.getElementById("rpm").value;
+    let eff = (launchSpeed / (2*Math.PI*0.05*(rpm/60)))*100;
+    
     document.getElementById("results").innerHTML = 
-    `Hız: <b>${v.toFixed(2)} m/s</b><br>Verim: <b>%${eff.toFixed(1)}</b><br><br>Ölçüm Tamamlandı ✅`;
+    `<h3>SONUÇ:</h3>
+     Fırlatma Hızı: <b style="color:lime; font-size:20px">${launchSpeed.toFixed(2)} m/s</b><br>
+     Verimlilik: <b>%${eff.toFixed(1)}</b>`;
 }
 
-function hueMatch(h){
-  if(hsv.hMin < hsv.hMax) return h>=hsv.hMin && h<=hsv.hMax;
-  else return h>=hsv.hMin || h<=hsv.hMax;
+function resetAll(){
+    state = "IDLE";
+    captureFrames = [];
+    locked = false;
+    lastPos = null;
+    scale = 0;
+    calibPoints = [];
+    searchWindow = 100;
+    updateButtons();
+    document.getElementById("results").innerHTML = "Veri bekleniyor...";
+    drawUI();
 }
 
-function rgbToHsv(r,g,b){
-  r/=255; g/=255; b/=255;
-  let max=Math.max(r,g,b), min=Math.min(r,g,b);
-  let h,s,v=max, d=max-min;
-  s=max==0?0:d/max;
-  if(max==min)h=0;
-  else{
-    switch(max){
-      case r:h=(g-b)/d+(g<b?6:0);break;
-      case g:h=(b-r)/d+2;break;
-      case b:h=(r-g)/d+4;break;
-    }
-    h/=6;
-  }
-  return [h*360,s*255,v*255];
+function updateButtons(){
+    document.getElementById("btnCalib").className = state === "CALIBRATING" ? "active" : "";
+    document.getElementById("btnTarget").className = state === "SELECTING_TARGET" ? "active" : "";
+    document.getElementById("btnTrack").innerText = state === "TRACKING" ? "DURDUR" : "3. BAŞLAT";
 }
 </script>
 
