@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pro Video Fizik Analizatörü</title>
+    <title>Pro Video Fizik Analizatörü v2</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
     <script async src="https://docs.opencv.org/4.5.0/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
@@ -12,13 +12,13 @@
         body { font-family: 'Inter', sans-serif; background-color: #121212; color: #e0e0e0; }
         .card { background-color: #1e1e1e; border: 1px solid #333; }
         .canvas-container { position: relative; width: 100%; overflow: hidden; border: 2px solid #444; border-radius: 8px; }
-        canvas { width: 100%; height: auto; display: block; }
+        canvas { width: 100%; height: auto; display: block; cursor: crosshair; }
         .overlay-info { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 5px 10px; border-radius: 4px; pointer-events: none; }
         .btn-custom { background-color: #0d6efd; border: none; }
-        .btn-custom:hover { background-color: #0b5ed7; }
-        .stat-box { background: #2c2c2c; padding: 15px; border-radius: 8px; margin-bottom: 10px; text-align: center; }
-        .stat-value { font-size: 1.5rem; font-weight: bold; color: #4ade80; }
-        .stat-label { font-size: 0.8rem; color: #aaa; }
+        .stat-box { background: #2c2c2c; padding: 10px; border-radius: 8px; margin-bottom: 8px; text-align: center; }
+        .stat-value { font-size: 1.2rem; font-weight: bold; color: #4ade80; }
+        .stat-label { font-size: 0.75rem; color: #aaa; }
+        .text-info-custom { color: #0dcaf0; }
         #loading { position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.9); z-index:9999; display:flex; justify-content:center; align-items:center; flex-direction:column; }
     </style>
 </head>
@@ -26,15 +26,15 @@
 
 <div id="loading">
     <div class="spinner-border text-primary" role="status"></div>
-    <div class="mt-3">OpenCV.js ve Analiz Motoru Yükleniyor...</div>
+    <div class="mt-3">Analiz Motoru v2 Yükleniyor...</div>
 </div>
 
-<div class="container-fluid py-4">
+<div class="container-fluid py-3">
     <div class="row">
         <div class="col-lg-8">
             <div class="card mb-3">
                 <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">Video Analiz Sahnesi</h5>
+                    <h5 class="mb-0">Video Sahnesi</h5>
                     <span class="badge bg-warning text-dark" id="modeStatus">Mod: Bekleniyor</span>
                 </div>
                 <div class="card-body p-0">
@@ -53,58 +53,115 @@
                     </div>
                 </div>
             </div>
+            
+            <div class="row">
+                <div class="col-md-4">
+                    <div class="stat-box border border-primary">
+                        <div class="stat-value text-primary" id="valTotalSpeed">0.00</div>
+                        <div class="stat-label">Toplam Hız ($V$)</div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="stat-box">
+                        <div class="stat-value text-info-custom" id="valVx">0.00</div>
+                        <div class="stat-label">Yatay Hız ($V_x$)</div>
+                        <small class="text-muted" style="font-size:0.6rem">Teorik (Açıya göre)</small>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="stat-box">
+                        <div class="stat-value text-info-custom" id="valVy">0.00</div>
+                        <div class="stat-label">Dikey Hız ($V_y$)</div>
+                        <small class="text-muted" style="font-size:0.6rem">Teorik (Açıya göre)</small>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="col-lg-4">
-            <div class="card mb-3">
-                <div class="card-header">1. Video Yükle</div>
-                <div class="card-body">
-                    <input type="file" class="form-control mb-2" id="fileInput" accept="video/*">
-                    <small class="text-muted">Not: Elle çekimlerde titreme sonuçları etkiler.</small>
-                </div>
-            </div>
-
-            <div class="card mb-3">
-                <div class="card-header">2. Kalibrasyon (Referans Çubuk)</div>
-                <div class="card-body">
-                    <p class="small text-muted">Videodaki çubuğun iki ucuna tıklayın.</p>
-                    <div class="input-group mb-2">
-                        <input type="number" class="form-control" id="refLength" placeholder="Örn: 1.5" step="0.01">
-                        <span class="input-group-text">Metre</span>
-                    </div>
-                    <button class="btn btn-outline-info w-100" id="btnCalibrate">Kalibrasyon Modunu Başlat</button>
-                    <div id="calibrationResult" class="mt-2 text-success small fw-bold"></div>
-                </div>
-            </div>
-
-            <div class="card mb-3">
-                <div class="card-header">3. Takip ve Fizik</div>
-                <div class="card-body">
-                    <p class="small text-muted">Objeyi kare içine alın veya manuel ilerleyin.</p>
-                    <button class="btn btn-success w-100 mb-2" id="btnTrackSelect">Objeyi Seç ve Başlat (Otomatik)</button>
-                    <button class="btn btn-warning w-100 mb-2" id="btnManualTrack">Manuel Takip (Kare Kare)</button>
-                    <button class="btn btn-danger w-100" id="btnReset">Sıfırla</button>
-                </div>
-            </div>
-
-            <div class="row g-2">
-                <div class="col-6">
-                    <div class="stat-box">
-                        <div class="stat-value" id="valSpeed">0.0</div>
-                        <div class="stat-label">Hız (m/s)</div>
+            <div class="accordion" id="accordionPanels">
+                
+                <div class="accordion-item bg-dark border-secondary">
+                    <h2 class="accordion-header">
+                        <button class="accordion-button bg-secondary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#panel1">
+                            1. Video Kaynağı
+                        </button>
+                    </h2>
+                    <div id="panel1" class="accordion-collapse collapse show" data-bs-parent="#accordionPanels">
+                        <div class="accordion-body text-light">
+                            <input type="file" class="form-control form-control-sm mb-2" id="fileInput" accept="video/*">
+                        </div>
                     </div>
                 </div>
+
+                <div class="accordion-item bg-dark border-secondary">
+                    <h2 class="accordion-header">
+                        <button class="accordion-button collapsed bg-secondary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#panel2">
+                            2. Kalibrasyon
+                        </button>
+                    </h2>
+                    <div id="panel2" class="accordion-collapse collapse" data-bs-parent="#accordionPanels">
+                        <div class="accordion-body text-light">
+                            <div class="input-group mb-2">
+                                <span class="input-group-text py-0">Referans (m)</span>
+                                <input type="number" class="form-control" id="refLength" placeholder="1.50" step="0.01">
+                            </div>
+                            <button class="btn btn-outline-info w-100 btn-sm" id="btnCalibrate">Kalibrasyon Yap</button>
+                            <div id="calibrationResult" class="mt-1 text-success small fw-bold text-center"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="accordion-item bg-dark border-secondary">
+                    <h2 class="accordion-header">
+                        <button class="accordion-button collapsed bg-primary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#panel3">
+                            3. Atış Açısı (Opsiyonel)
+                        </button>
+                    </h2>
+                    <div id="panel3" class="accordion-collapse collapse" data-bs-parent="#accordionPanels">
+                        <div class="accordion-body text-light">
+                            <p class="small text-muted mb-1">Yatay zemin 0°, Dikey yukarı 90° kabul edilir.</p>
+                            <div class="input-group mb-2">
+                                <span class="input-group-text py-0">Açı (°)</span>
+                                <input type="number" class="form-control" id="inputAngle" placeholder="45" min="0" max="180">
+                            </div>
+                            <button class="btn btn-outline-warning w-100 btn-sm" id="btnSetAngle">Açıyı Görselleştir</button>
+                            <div class="form-check mt-2">
+                                <input class="form-check-input" type="checkbox" id="chkShowGuide" checked>
+                                <label class="form-check-label small" for="chkShowGuide">Kılavuz Çizgisini Göster</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="accordion-item bg-dark border-secondary">
+                    <h2 class="accordion-header">
+                        <button class="accordion-button collapsed bg-secondary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#panel4">
+                            4. Takip ve Analiz
+                        </button>
+                    </h2>
+                    <div id="panel4" class="accordion-collapse collapse" data-bs-parent="#accordionPanels">
+                        <div class="accordion-body text-light">
+                            <button class="btn btn-success w-100 mb-2 btn-sm" id="btnTrackSelect">Otomatik Takip (CamShift)</button>
+                            <button class="btn btn-warning w-100 mb-2 btn-sm" id="btnManualTrack">Manuel Takip (Tıkla-İlerle)</button>
+                            <button class="btn btn-danger w-100 btn-sm" id="btnReset">Sıfırla</button>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <div class="row g-2 mt-2">
                 <div class="col-6">
                     <div class="stat-box">
                         <div class="stat-value" id="valAccel">0.0</div>
                         <div class="stat-label">İvme (m/s²)</div>
                     </div>
                 </div>
-                <div class="col-12">
+                <div class="col-6">
                     <div class="stat-box">
                         <div class="stat-value text-warning" id="valGravity">0.00</div>
-                        <div class="stat-label">Gözlemlenen Dikey İvme (Magnus/Drag Etkisi)</div>
-                        <small class="text-muted" style="font-size:0.6rem">Standart Yerçekimi: 9.81 m/s²</small>
+                        <div class="stat-label">Gözlenen Yerçekimi</div>
                     </div>
                 </div>
             </div>
@@ -118,12 +175,15 @@ let video = document.getElementById('videoInput');
 let canvas = document.getElementById('canvasOutput');
 let ctx = canvas.getContext('2d');
 let stream = null;
-let cap = null;
 let isPlaying = false;
-let currentMode = 'idle'; // idle, calibrating, selecting, tracking, manual
+let currentMode = 'idle'; 
 let pxPerMeter = 0;
 let calibrationPoints = [];
-let framesData = []; // {time, x, y}
+let framesData = []; 
+
+// Yeni Değişkenler
+let launchAngleDeg = 0;
+let launchOrigin = null; // {x, y}
 
 // OpenCV Değişkenleri
 let trackWindow = null;
@@ -131,9 +191,6 @@ let roiHist = null;
 let hsv = null;
 let dst = null;
 let termCrit = null;
-
-// Fizik Değişkenleri
-let lastTime = 0;
 
 function onOpenCvReady() {
     cvReady = true;
@@ -167,7 +224,7 @@ document.getElementById('videoSeek').addEventListener('input', (e) => {
 });
 
 document.getElementById('nextFrame').addEventListener('click', () => {
-    video.currentTime += 1/30; // 30 FPS varsayımı
+    video.currentTime += 1/30; 
     setTimeout(drawFrame, 100);
 });
 document.getElementById('prevFrame').addEventListener('click', () => {
@@ -175,7 +232,7 @@ document.getElementById('prevFrame').addEventListener('click', () => {
     setTimeout(drawFrame, 100);
 });
 
-// Çizim ve Mouse Olayları
+// --- Mouse Etkileşimleri ---
 canvas.addEventListener('mousedown', (e) => {
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
@@ -189,12 +246,16 @@ canvas.addEventListener('mousedown', (e) => {
         if (calibrationPoints.length === 2) {
             finishCalibration();
         }
+    } else if (currentMode === 'settingAngle') {
+        // Açı orijini belirleme
+        launchOrigin = {x, y};
+        document.getElementById('modeStatus').innerText = "Mod: Açı Merkezi Belirlendi";
+        currentMode = 'idle';
+        drawFrame();
     } else if (currentMode === 'selecting') {
-        // İlk tıklama: kutunun sol üstü
         if (!trackWindow) {
             trackWindow = {x: x, y: y, width: 0, height: 0};
         } else {
-            // İkinci tıklama: genişlik yükseklik
             trackWindow.width = x - trackWindow.x;
             trackWindow.height = y - trackWindow.y;
             startTracking();
@@ -202,7 +263,6 @@ canvas.addEventListener('mousedown', (e) => {
     } else if (currentMode === 'manual') {
         processPhysics(x, y, video.currentTime);
         drawMarker(x, y, 'red');
-        // Otomatik bir sonraki kareye geç
         video.currentTime += 1/30; 
         setTimeout(drawFrame, 100);
     }
@@ -215,11 +275,11 @@ function drawMarker(x, y, color) {
     ctx.fill();
 }
 
-// 1. Kalibrasyon Mantığı
+// 1. Kalibrasyon
 document.getElementById('btnCalibrate').addEventListener('click', () => {
     currentMode = 'calibrating';
     calibrationPoints = [];
-    document.getElementById('modeStatus').innerText = "Mod: Kalibrasyon (Çubuğun uçlarına tıkla)";
+    document.getElementById('modeStatus').innerText = "Mod: Kalibrasyon (Çubuğun iki ucuna tıkla)";
     video.pause(); isPlaying = false;
 });
 
@@ -229,43 +289,82 @@ function finishCalibration() {
     let pixelDist = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
     let realLength = parseFloat(document.getElementById('refLength').value);
     
-    if (!realLength) { alert("Lütfen çubuk uzunluğunu girin!"); return; }
+    if (!realLength) { alert("Uzunluk giriniz!"); return; }
 
     pxPerMeter = pixelDist / realLength;
-    document.getElementById('calibrationResult').innerText = `1 Metre = ${pxPerMeter.toFixed(1)} Piksel`;
+    document.getElementById('calibrationResult').innerText = `1m = ${pxPerMeter.toFixed(1)}px`;
     currentMode = 'idle';
     document.getElementById('modeStatus').innerText = "Mod: Hazır";
-    
-    // Görsel geri bildirim için çizgi çiz
-    ctx.strokeStyle = 'yellow';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(p1.x, p1.y);
-    ctx.lineTo(p2.x, p2.y);
-    ctx.stroke();
+    drawFrame();
 }
 
-// 2. Otomatik Takip (CamShift)
-document.getElementById('btnTrackSelect').addEventListener('click', () => {
-    if(pxPerMeter === 0) { alert("Önce kalibrasyon yapın!"); return; }
-    currentMode = 'selecting';
-    trackWindow = null;
-    document.getElementById('modeStatus').innerText = "Mod: Objeyi Seç (Sol-Üst tıkla, sonra Sağ-Alt tıkla)";
+// 2. Açı Ayarlama (YENİ)
+document.getElementById('btnSetAngle').addEventListener('click', () => {
+    let val = parseFloat(document.getElementById('inputAngle').value);
+    if(isNaN(val)) { alert("Lütfen bir açı girin"); return; }
+    
+    launchAngleDeg = val;
+    currentMode = 'settingAngle';
+    document.getElementById('modeStatus').innerText = "Mod: Topun Çıkış Noktasına Tıkla";
     video.pause();
 });
 
+function drawAngleGuide() {
+    if (!launchOrigin || !document.getElementById('chkShowGuide').checked) return;
+    
+    // Canvas'ta Y ekseni ters (aşağı doğru artar).
+    // Standart fizik: 0 derece sağ, 90 derece yukarı.
+    // Bu yüzden Y formülünde eksi kullanıyoruz.
+    const length = 2000; // Uzun bir çizgi
+    const rad = launchAngleDeg * (Math.PI / 180);
+    
+    const endX = launchOrigin.x + length * Math.cos(rad);
+    const endY = launchOrigin.y - length * Math.sin(rad); // Y ekseni ters çevrimi
+    
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(launchOrigin.x, launchOrigin.y);
+    ctx.lineTo(endX, endY);
+    ctx.strokeStyle = 'rgba(13, 202, 240, 0.8)'; // Cyan renk
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]); // Kesikli çizgi
+    ctx.stroke();
+    
+    // Açıyı yaz
+    ctx.fillStyle = 'rgba(13, 202, 240, 1)';
+    ctx.font = "16px Arial";
+    ctx.fillText(launchAngleDeg + "°", launchOrigin.x + 20, launchOrigin.y - 20);
+    ctx.restore();
+}
+
+// 3. Takip
+document.getElementById('btnTrackSelect').addEventListener('click', () => {
+    if(pxPerMeter === 0) { alert("Önce kalibrasyon!"); return; }
+    currentMode = 'selecting';
+    trackWindow = null;
+    document.getElementById('modeStatus').innerText = "Mod: Objeyi Seç (Sol-Üst -> Sağ-Alt)";
+    video.pause();
+});
+
+document.getElementById('btnManualTrack').addEventListener('click', () => {
+    if(pxPerMeter === 0) { alert("Önce kalibrasyon!"); return; }
+    currentMode = 'manual';
+    document.getElementById('modeStatus').innerText = "Mod: Manuel Takip";
+    video.pause();
+    framesData = [];
+});
+
 function startTracking() {
-    // OpenCV Matrislerini Hazırla
+    // OpenCV Setup
     let src = cv.imread(canvas);
     hsv = new cv.Mat();
     cv.cvtColor(src, hsv, cv.COLOR_RGBA2RGB);
     cv.cvtColor(hsv, hsv, cv.COLOR_RGB2HSV);
     
-    // Maske oluştur (seçilen alanın renk histogramını al)
     let roi = hsv.roi(new cv.Rect(trackWindow.x, trackWindow.y, trackWindow.width, trackWindow.height));
     roiHist = new cv.Mat();
     let mask = new cv.Mat();
-    let channels = [0]; // Hue kanalı
+    let channels = [0]; 
     let histSize = [180];
     let ranges = [0, 180];
     
@@ -273,35 +372,19 @@ function startTracking() {
     cv.normalize(roiHist, roiHist, 0, 255, cv.NORM_MINMAX);
     
     roi.delete(); mask.delete(); src.delete();
-    
     termCrit = new cv.TermCriteria(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 10, 1);
     
     currentMode = 'tracking';
-    document.getElementById('modeStatus').innerText = "Mod: Takip Ediliyor...";
     video.play();
     isPlaying = true;
     requestAnimationFrame(processVideo);
 }
 
-// 3. Manuel Takip
-document.getElementById('btnManualTrack').addEventListener('click', () => {
-    if(pxPerMeter === 0) { alert("Önce kalibrasyon yapın!"); return; }
-    currentMode = 'manual';
-    document.getElementById('modeStatus').innerText = "Mod: Manuel (Her frame'de objeye tıkla)";
-    video.pause();
-    framesData = []; // Verileri sıfırla
-});
-
-// Ana Döngü
 function processVideo() {
     if (!isPlaying && currentMode !== 'tracking') return;
-    
-    if (video.paused || video.ended) {
-        isPlaying = false;
-        return;
-    }
+    if (video.paused || video.ended) { isPlaying = false; return; }
 
-    drawFrame(); // Videoyu canvas'a bas
+    drawFrame(); 
 
     if (currentMode === 'tracking') {
         let src = cv.imread(canvas);
@@ -310,92 +393,86 @@ function processVideo() {
         cv.cvtColor(hsvCanvas, hsvCanvas, cv.COLOR_RGB2HSV);
         
         dst = new cv.Mat();
-        let channels = [0];
-        let ranges = [0, 180];
-        
-        // CamShift için BackProjection
+        let channels = [0]; let ranges = [0, 180];
         cv.calcBackProject([hsvCanvas], channels, roiHist, dst, ranges, 1);
         
-        // CamShift uygula
         let [rotatedRect, trackBox] = cv.CamShift(dst, trackWindow, termCrit);
         
-        // Kutuyu güncelle
         trackWindow.x = trackBox.x;
         trackWindow.y = trackBox.y;
         trackWindow.width = trackBox.width;
         trackWindow.height = trackBox.height;
 
-        // Ekrana çiz
+        let centerX = trackWindow.x + trackWindow.width / 2;
+        let centerY = trackWindow.y + trackWindow.height / 2;
+        
+        // Takip karesini çiz
         let pts = cv.rotatedRectPoints(rotatedRect);
-        ctx.strokeStyle = 'red';
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = 'red'; ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(pts[0].x, pts[0].y);
         ctx.lineTo(pts[1].x, pts[1].y);
         ctx.lineTo(pts[2].x, pts[2].y);
         ctx.lineTo(pts[3].x, pts[3].y);
-        ctx.closePath();
-        ctx.stroke();
+        ctx.closePath(); ctx.stroke();
 
-        // Merkez noktası
-        let centerX = trackWindow.x + trackWindow.width / 2;
-        let centerY = trackWindow.y + trackWindow.height / 2;
-        
         processPhysics(centerX, centerY, video.currentTime);
-
         src.delete(); hsvCanvas.delete(); dst.delete();
         requestAnimationFrame(processVideo);
     }
-    
-    // Seek bar güncelle
     document.getElementById('videoSeek').value = (video.currentTime / video.duration) * 100;
 }
 
 function drawFrame() {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    
+    // Kalibrasyon çizgisi varsa
+    if (calibrationPoints.length === 2) {
+        ctx.strokeStyle = 'yellow'; ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(calibrationPoints[0].x, calibrationPoints[0].y);
+        ctx.lineTo(calibrationPoints[1].x, calibrationPoints[1].y);
+        ctx.stroke();
+    }
+    
+    // Açı çizgisi varsa (YENİ)
+    drawAngleGuide();
 }
 
-// Fizik Motoru
 function processPhysics(x, y, time) {
-    // Veri ekle
     framesData.push({ t: time, x: x, y: y });
-    
     if (framesData.length < 2) return;
 
     let prev = framesData[framesData.length - 2];
     let curr = framesData[framesData.length - 1];
-    
     let dt = curr.t - prev.t;
     if (dt <= 0) return;
 
-    // Piksel mesafesi
-    let dX_px = Math.abs(curr.x - prev.x);
-    let dY_px = Math.abs(curr.y - prev.y); // Y aşağı doğru artar
-    let dist_px = Math.sqrt(dX_px*dX_px + dY_px*dY_px);
-
-    // Metrik Dönüşüm
+    let dist_px = Math.sqrt(Math.pow(curr.x - prev.x, 2) + Math.pow(curr.y - prev.y, 2));
     let speed = (dist_px / pxPerMeter) / dt; // m/s
     
-    // Ekrana yaz
-    document.getElementById('valSpeed').innerText = speed.toFixed(2);
+    document.getElementById('valTotalSpeed').innerText = speed.toFixed(2);
+    
+    // Hız Bileşenleri Hesaplama (YENİ)
+    // Eğer açı girildiyse, bu hızı o açıya göre parçala
+    if (launchAngleDeg > 0) {
+        let rad = launchAngleDeg * (Math.PI / 180);
+        let vx = speed * Math.cos(rad);
+        let vy = speed * Math.sin(rad);
+        
+        document.getElementById('valVx').innerText = vx.toFixed(2);
+        document.getElementById('valVy').innerText = vy.toFixed(2);
+    }
 
-    // İvme Hesaplama (Son 3 nokta varsa)
     if (framesData.length > 2) {
         let prev2 = framesData[framesData.length - 3];
         let v1 = (Math.sqrt(Math.pow(prev.x - prev2.x, 2) + Math.pow(prev.y - prev2.y, 2)) / pxPerMeter) / (prev.t - prev2.t);
         let accel = (speed - v1) / dt;
         document.getElementById('valAccel').innerText = accel.toFixed(2);
 
-        // Dikey İvme (Yerçekimi / Magnus Analizi)
-        // Y ekseni hızı (aşağı +, yukarı -)
         let vy_curr = ((curr.y - prev.y) / pxPerMeter) / dt;
         let vy_prev = ((prev.y - prev2.y) / pxPerMeter) / (prev.t - prev2.t);
-        
         let ay = (vy_curr - vy_prev) / dt; 
-        
-        // Gerçek dünyada yerçekimi aşağı doğru pozitiftir (ekran koordinatlarında)
-        // Eğer ay, 9.81'den küçükse cisim "tutunuyor" demektir (Lift/Magnus).
-        // Eğer çok büyükse aşağı çakılıyordur (Top spin).
         document.getElementById('valGravity').innerText = Math.abs(ay).toFixed(2);
     }
 }
@@ -403,6 +480,7 @@ function processPhysics(x, y, time) {
 document.getElementById('btnReset').addEventListener('click', () => {
     framesData = [];
     currentMode = 'idle';
+    launchOrigin = null; // Açı çizgisini de temizle
     document.getElementById('modeStatus').innerText = "Sıfırlandı";
     drawFrame();
 });
