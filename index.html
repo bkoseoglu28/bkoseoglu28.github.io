@@ -1,343 +1,412 @@
 <!DOCTYPE html>
-<html>
+<html lang="tr">
 <head>
-<meta charset="UTF-8">
-<title>Robot Shot Analyzer - Ultimate</title>
-<style>
-  body { background:#111; color:#eee; font-family:sans-serif; text-align:center; margin:0; overflow:hidden; }
-  
-  /* Alt Kontrol Paneli */
-  #controls {
-    position: absolute; bottom: 0; left: 0; width: 100%; height: 140px;
-    background: #222; border-top: 1px solid #444; z-index: 100;
-    display: flex; flex-direction: column; justify-content: center; align-items: center;
-    gap: 10px; padding-bottom: 10px;
-  }
-  
-  .row { display: flex; gap: 15px; align-items: center; width: 90%; justify-content: center; }
-  
-  /* Slider */
-  input[type="range"]#seekBar { width: 100%; cursor: pointer; accent-color: #0984e3; height: 5px; }
-  
-  /* Inputs & Buttons */
-  input[type="number"] { width: 50px; background: #333; color: white; border: 1px solid #555; padding: 5px; text-align: center; }
-  
-  button { 
-    padding: 8px 15px; cursor: pointer; background: #333; color: white; border: 1px solid #555; 
-    border-radius: 4px; font-weight: bold; min-width: 100px;
-  }
-  button:hover { background: #555; }
-  button.active { background: #e17055; border-color: red; }
-  button.green { background: #00b894; border: none; color: black; box-shadow: 0 0 10px #00b894; }
-
-  /* Video Alanı */
-  #stage { position: absolute; top: 0; left: 0; width: 100%; height: calc(100vh - 140px); background: black; display: flex; justify-content: center; align-items: center; }
-  video { max-width: 100%; max-height: 100%; display: block; }
-  canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: auto; }
-
-  #info { 
-    position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); 
-    padding: 10px; border-radius: 5px; pointer-events: none; text-align: left;
-  }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pro Video Fizik Analizatörü</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <script async src="https://docs.opencv.org/4.5.0/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
+    
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #121212; color: #e0e0e0; }
+        .card { background-color: #1e1e1e; border: 1px solid #333; }
+        .canvas-container { position: relative; width: 100%; overflow: hidden; border: 2px solid #444; border-radius: 8px; }
+        canvas { width: 100%; height: auto; display: block; }
+        .overlay-info { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 5px 10px; border-radius: 4px; pointer-events: none; }
+        .btn-custom { background-color: #0d6efd; border: none; }
+        .btn-custom:hover { background-color: #0b5ed7; }
+        .stat-box { background: #2c2c2c; padding: 15px; border-radius: 8px; margin-bottom: 10px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: bold; color: #4ade80; }
+        .stat-label { font-size: 0.8rem; color: #aaa; }
+        #loading { position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.9); z-index:9999; display:flex; justify-content:center; align-items:center; flex-direction:column; }
+    </style>
 </head>
 <body>
 
-<div id="stage">
-  <video id="video" playsinline muted></video>
-  <canvas id="canvas"></canvas>
-  <div id="info">Durum: Video Yükle...</div>
+<div id="loading">
+    <div class="spinner-border text-primary" role="status"></div>
+    <div class="mt-3">OpenCV.js ve Analiz Motoru Yükleniyor...</div>
 </div>
 
-<div id="controls">
-  <div class="row" style="width: 95%;">
-    <span style="font-size:12px">Frame:</span>
-    <button onclick="seek(-0.03)" style="min-width:40px">⏪</button>
-    <input type="range" id="seekBar" value="0" step="0.001" oninput="manualSeek()">
-    <button onclick="seek(0.03)" style="min-width:40px">⏩</button>
-  </div>
+<div class="container-fluid py-4">
+    <div class="row">
+        <div class="col-lg-8">
+            <div class="card mb-3">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Video Analiz Sahnesi</h5>
+                    <span class="badge bg-warning text-dark" id="modeStatus">Mod: Bekleniyor</span>
+                </div>
+                <div class="card-body p-0">
+                    <div class="canvas-container" id="canvasWrapper">
+                        <video id="videoInput" style="display:none;" muted></video>
+                        <canvas id="canvasOutput"></canvas>
+                        <div class="overlay-info" id="overlayInfo">Video Yükleyin</div>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <input type="range" class="form-range" id="videoSeek" value="0" min="0" max="100" step="0.1" disabled>
+                    <div class="d-flex justify-content-center gap-2 mt-2">
+                        <button class="btn btn-secondary btn-sm" id="prevFrame">< Frame Geri</button>
+                        <button class="btn btn-primary btn-sm" id="playPause">Oynat / Durdur</button>
+                        <button class="btn btn-secondary btn-sm" id="nextFrame">Frame İleri ></button>
+                    </div>
+                </div>
+            </div>
+        </div>
 
-  <div class="row">
-    <input type="file" id="up" accept="video/*" style="width:180px">
-    <span>Çubuk (m): <input type="number" id="rod" value="0.5" step="0.05"></span>
-    <span title="Düşük=Hassas, Yüksek=Kaba">Hassasiyet: <input type="number" id="sens" value="25"></span>
-  </div>
+        <div class="col-lg-4">
+            <div class="card mb-3">
+                <div class="card-header">1. Video Yükle</div>
+                <div class="card-body">
+                    <input type="file" class="form-control mb-2" id="fileInput" accept="video/*">
+                    <small class="text-muted">Not: Elle çekimlerde titreme sonuçları etkiler.</small>
+                </div>
+            </div>
 
-  <div class="row">
-    <button onclick="setMode('CALIB')" id="bCalib">1. Kalibre</button>
-    <button onclick="setMode('SELECT')" id="bSel">2. Hedef Seç</button>
-    <button onclick="toggleRun()" id="bRun" class="green">3. BAŞLAT</button>
-    <button onclick="reset()" style="background:#d63031; border:none;">Sıfırla</button>
-  </div>
+            <div class="card mb-3">
+                <div class="card-header">2. Kalibrasyon (Referans Çubuk)</div>
+                <div class="card-body">
+                    <p class="small text-muted">Videodaki çubuğun iki ucuna tıklayın.</p>
+                    <div class="input-group mb-2">
+                        <input type="number" class="form-control" id="refLength" placeholder="Örn: 1.5" step="0.01">
+                        <span class="input-group-text">Metre</span>
+                    </div>
+                    <button class="btn btn-outline-info w-100" id="btnCalibrate">Kalibrasyon Modunu Başlat</button>
+                    <div id="calibrationResult" class="mt-2 text-success small fw-bold"></div>
+                </div>
+            </div>
+
+            <div class="card mb-3">
+                <div class="card-header">3. Takip ve Fizik</div>
+                <div class="card-body">
+                    <p class="small text-muted">Objeyi kare içine alın veya manuel ilerleyin.</p>
+                    <button class="btn btn-success w-100 mb-2" id="btnTrackSelect">Objeyi Seç ve Başlat (Otomatik)</button>
+                    <button class="btn btn-warning w-100 mb-2" id="btnManualTrack">Manuel Takip (Kare Kare)</button>
+                    <button class="btn btn-danger w-100" id="btnReset">Sıfırla</button>
+                </div>
+            </div>
+
+            <div class="row g-2">
+                <div class="col-6">
+                    <div class="stat-box">
+                        <div class="stat-value" id="valSpeed">0.0</div>
+                        <div class="stat-label">Hız (m/s)</div>
+                    </div>
+                </div>
+                <div class="col-6">
+                    <div class="stat-box">
+                        <div class="stat-value" id="valAccel">0.0</div>
+                        <div class="stat-label">İvme (m/s²)</div>
+                    </div>
+                </div>
+                <div class="col-12">
+                    <div class="stat-box">
+                        <div class="stat-value text-warning" id="valGravity">0.00</div>
+                        <div class="stat-label">Gözlemlenen Dikey İvme (Magnus/Drag Etkisi)</div>
+                        <small class="text-muted" style="font-size:0.6rem">Standart Yerçekimi: 9.81 m/s²</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <script>
-const video = document.getElementById("video");
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d", { willReadFrequently: true });
-const seekBar = document.getElementById("seekBar");
-const info = document.getElementById("info");
+let cvReady = false;
+let video = document.getElementById('videoInput');
+let canvas = document.getElementById('canvasOutput');
+let ctx = canvas.getContext('2d');
+let stream = null;
+let cap = null;
+let isPlaying = false;
+let currentMode = 'idle'; // idle, calibrating, selecting, tracking, manual
+let pxPerMeter = 0;
+let calibrationPoints = [];
+let framesData = []; // {time, x, y}
 
-// DURUMLAR
-let mode = "IDLE"; 
-let scale = 0; // px -> metre
-let running = false;
+// OpenCV Değişkenleri
+let trackWindow = null;
+let roiHist = null;
+let hsv = null;
+let dst = null;
+let termCrit = null;
 
-// TRACKING
-let targetHSV = {h:0, s:0, v:0};
-let lastPos = null;
+// Fizik Değişkenleri
 let lastTime = 0;
-let prevFrameData = null; // Hareket algılama için hafıza
 
-// FİZİK
-let speeds = [];
-
-// -- VİDEO YÖNETİMİ --
-document.getElementById("up").onchange = e => {
-  if(e.target.files[0]) {
-    video.src = URL.createObjectURL(e.target.files[0]);
-    reset();
-  }
-};
-
-video.onloadedmetadata = () => {
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  seekBar.max = video.duration;
-  resize();
-};
-
-window.onresize = resize;
-function resize(){
-  // Canvas'ı videonun ekrandaki boyutuna eşitle (Tıklama koordinatları için önemli)
-  // Basit tutmak için CSS ile hallediyoruz, burası sadece tetikleyici.
+function onOpenCvReady() {
+    cvReady = true;
+    document.getElementById('loading').style.display = 'none';
+    console.log('OpenCV.js Loaded');
 }
 
-video.ontimeupdate = () => {
-  if(!running) seekBar.value = video.currentTime;
-};
+// Dosya Yükleme
+document.getElementById('fileInput').addEventListener('change', (e) => {
+    let file = e.target.files[0];
+    if(!file) return;
+    video.src = URL.createObjectURL(file);
+    video.onloadedmetadata = () => {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        video.currentTime = 0;
+        document.getElementById('overlayInfo').innerText = `Video: ${video.videoWidth}x${video.videoHeight} | Süre: ${video.duration.toFixed(1)}s`;
+        drawFrame();
+    };
+});
 
-function manualSeek(){
-  video.currentTime = seekBar.value;
-  stopRun(); // Elle sarınca takibi durdur
-  drawFrame(); // O kareyi göster
-}
+// Video Kontrolleri
+document.getElementById('playPause').addEventListener('click', () => {
+    if (isPlaying) { video.pause(); isPlaying = false; }
+    else { video.play(); isPlaying = true; requestAnimationFrame(processVideo); }
+});
 
-function seek(dt){
-  video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + dt));
-  stopRun();
-  setTimeout(drawFrame, 50); // Video update beklet
-}
+document.getElementById('videoSeek').addEventListener('input', (e) => {
+    video.currentTime = (video.duration * e.target.value) / 100;
+    drawFrame();
+});
 
-function drawFrame(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  // Video zaten arkada oynuyor, canvas sadece çizimler için
-  if(lastPos) {
-      ctx.strokeStyle="lime"; ctx.lineWidth=2; 
-      ctx.strokeRect(lastPos.x-20, lastPos.y-20, 40, 40);
-  }
-}
+document.getElementById('nextFrame').addEventListener('click', () => {
+    video.currentTime += 1/30; // 30 FPS varsayımı
+    setTimeout(drawFrame, 100);
+});
+document.getElementById('prevFrame').addEventListener('click', () => {
+    video.currentTime -= 1/30;
+    setTimeout(drawFrame, 100);
+});
 
-// -- ETKİLEŞİM --
-function setMode(m){
-  mode = m;
-  stopRun();
-  updateButtons();
-  if(m==='CALIB') info.innerHTML = "Çubuğun iki ucuna tıkla.";
-  if(m==='SELECT') info.innerHTML = "Videoyu kaydır, topun olduğu kareye gel ve topa tıkla.";
-}
+// Çizim ve Mouse Olayları
+canvas.addEventListener('mousedown', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
 
-// Tıklama Koordinat Dönüşümü
-canvas.onmousedown = e => {
-  const rect = video.getBoundingClientRect(); // Videonun ekrandaki boyutu
-  const scaleX = video.videoWidth / rect.width;
-  const scaleY = video.videoHeight / rect.height;
-  
-  // Tıklanan yerin videodaki gerçek piksel karşılığı
-  const x = (e.clientX - rect.left) * scaleX;
-  const y = (e.clientY - rect.top) * scaleY;
-  
-  if(mode === 'CALIB') doCalib(x, y);
-  if(mode === 'SELECT') doSelect(x, y);
-};
-
-let calibPts = [];
-function doCalib(x, y){
-  calibPts.push({x,y});
-  ctx.fillStyle="cyan"; ctx.beginPath(); ctx.arc(x,y,5,0,Math.PI*2); ctx.fill();
-  
-  if(calibPts.length === 2){
-    let dist = Math.hypot(calibPts[1].x - calibPts[0].x, calibPts[1].y - calibPts[0].y);
-    let real = parseFloat(document.getElementById("rod").value);
-    scale = real / dist;
-    info.innerHTML = `Kalibre: 1m = ${(1/scale).toFixed(0)}px. Şimdi Hedef Seç.`;
-    calibPts = [];
-    mode = "IDLE";
-    updateButtons();
-  }
-}
-
-function doSelect(x, y){
-  // O anki kareden rengi al
-  const tempC = document.createElement("canvas");
-  tempC.width = video.videoWidth; tempC.height = video.videoHeight;
-  const tCtx = tempC.getContext("2d");
-  tCtx.drawImage(video, 0, 0);
-  const p = tCtx.getImageData(x, y, 1, 1).data;
-  
-  targetHSV = rgbToHsv(p[0], p[1], p[2]);
-  lastPos = {x, y};
-  
-  info.innerHTML = `Hedef Seçildi! Konum: ${x.toFixed(0)},${y.toFixed(0)}. Başlat'a bas.`;
-  drawFrame(); // Seçim karesini çiz
-  mode = "READY";
-  updateButtons();
-}
-
-// -- ÇALIŞTIRMA (Motion + Color Engine) --
-function toggleRun(){
-  if(running) stopRun();
-  else {
-    if(!lastPos) { alert("Hedef seçmedin!"); return; }
-    if(scale===0) { alert("Kalibre etmedin!"); return; }
-    running = true;
-    prevFrameData = null; // Hareket hafızasını sıfırla
-    video.play();
-    loop();
-    updateButtons();
-  }
-}
-
-function stopRun(){
-  running = false;
-  video.pause();
-  updateButtons();
-}
-
-function loop(){
-  if(!running || video.paused) return;
-
-  // 1. Görüntü Al
-  const w = canvas.width, h = canvas.height;
-  const tempC = document.createElement("canvas"); // Offscreen canvas for processing
-  tempC.width = w/4; tempC.height = h/4; // Performans için küçük işle
-  const tCtx = tempC.getContext("2d", {willReadFrequently:true});
-  
-  tCtx.drawImage(video, 0, 0, tempC.width, tempC.height);
-  const frame = tCtx.getImageData(0,0,tempC.width,tempC.height);
-  const data = frame.data;
-  
-  if(!prevFrameData) {
-    prevFrameData = new Uint8ClampedArray(data);
-    requestAnimationFrame(loop);
-    return;
-  }
-
-  // 2. Analiz (Motion + Color)
-  let sumX=0, sumY=0, count=0;
-  const thresh = parseInt(document.getElementById("sens").value);
-  const ratio = 4; // Küçültme oranı
-  
-  // Arama Penceresi (Sadece lastPos etrafı)
-  let box = 100 / ratio; 
-  let sx = Math.max(0, Math.floor((lastPos.x/ratio) - box));
-  let sy = Math.max(0, Math.floor((lastPos.y/ratio) - box));
-  let ex = Math.min(tempC.width, sx + box*2);
-  let ey = Math.min(tempC.height, sy + box*2);
-
-  for(let y=sy; y<ey; y++){
-    for(let x=sx; x<ex; x++){
-      const i = (y * tempC.width + x) * 4;
-      
-      // HAREKET KONTROLÜ (Sandalye Filtresi)
-      const diff = Math.abs(data[i]-prevFrameData[i]) + 
-                   Math.abs(data[i+1]-prevFrameData[i+1]) + 
-                   Math.abs(data[i+2]-prevFrameData[i+2]);
-      
-      if(diff > thresh){ // Sadece hareket edenler
-        
-        // RENK KONTROLÜ
-        const hsv = rgbToHsv(data[i], data[i+1], data[i+2]);
-        if(isMatch(hsv)){
-          sumX += x; sumY += y; count++;
+    if (currentMode === 'calibrating') {
+        calibrationPoints.push({x, y});
+        drawMarker(x, y, 'yellow');
+        if (calibrationPoints.length === 2) {
+            finishCalibration();
         }
-      }
+    } else if (currentMode === 'selecting') {
+        // İlk tıklama: kutunun sol üstü
+        if (!trackWindow) {
+            trackWindow = {x: x, y: y, width: 0, height: 0};
+        } else {
+            // İkinci tıklama: genişlik yükseklik
+            trackWindow.width = x - trackWindow.x;
+            trackWindow.height = y - trackWindow.y;
+            startTracking();
+        }
+    } else if (currentMode === 'manual') {
+        processPhysics(x, y, video.currentTime);
+        drawMarker(x, y, 'red');
+        // Otomatik bir sonraki kareye geç
+        video.currentTime += 1/30; 
+        setTimeout(drawFrame, 100);
     }
-  }
+});
 
-  // Hafızayı güncelle
-  prevFrameData.set(data);
+function drawMarker(x, y, color) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x, y, 5, 0, 2 * Math.PI);
+    ctx.fill();
+}
 
-  // 3. Sonuç
-  ctx.clearRect(0,0,w,h);
-  
-  if(count > 2){
-    let curX = (sumX / count) * ratio;
-    let curY = (sumY / count) * ratio;
+// 1. Kalibrasyon Mantığı
+document.getElementById('btnCalibrate').addEventListener('click', () => {
+    currentMode = 'calibrating';
+    calibrationPoints = [];
+    document.getElementById('modeStatus').innerText = "Mod: Kalibrasyon (Çubuğun uçlarına tıkla)";
+    video.pause(); isPlaying = false;
+});
+
+function finishCalibration() {
+    let p1 = calibrationPoints[0];
+    let p2 = calibrationPoints[1];
+    let pixelDist = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+    let realLength = parseFloat(document.getElementById('refLength').value);
     
-    // Hız
-    let dt = video.currentTime - lastTime;
-    if(dt>0 && dt<0.1){
-      let dist = Math.hypot(curX-lastPos.x, curY-lastPos.y);
-      let v = (dist * scale) / dt;
-      if(v > 0.5 && v < 25) {
-        info.innerHTML = `<b style='color:lime; font-size:20px'>Hız: ${v.toFixed(2)} m/s</b>`;
-        speeds.push(v);
-      }
+    if (!realLength) { alert("Lütfen çubuk uzunluğunu girin!"); return; }
+
+    pxPerMeter = pixelDist / realLength;
+    document.getElementById('calibrationResult').innerText = `1 Metre = ${pxPerMeter.toFixed(1)} Piksel`;
+    currentMode = 'idle';
+    document.getElementById('modeStatus').innerText = "Mod: Hazır";
+    
+    // Görsel geri bildirim için çizgi çiz
+    ctx.strokeStyle = 'yellow';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(p1.x, p1.y);
+    ctx.lineTo(p2.x, p2.y);
+    ctx.stroke();
+}
+
+// 2. Otomatik Takip (CamShift)
+document.getElementById('btnTrackSelect').addEventListener('click', () => {
+    if(pxPerMeter === 0) { alert("Önce kalibrasyon yapın!"); return; }
+    currentMode = 'selecting';
+    trackWindow = null;
+    document.getElementById('modeStatus').innerText = "Mod: Objeyi Seç (Sol-Üst tıkla, sonra Sağ-Alt tıkla)";
+    video.pause();
+});
+
+function startTracking() {
+    // OpenCV Matrislerini Hazırla
+    let src = cv.imread(canvas);
+    hsv = new cv.Mat();
+    cv.cvtColor(src, hsv, cv.COLOR_RGBA2RGB);
+    cv.cvtColor(hsv, hsv, cv.COLOR_RGB2HSV);
+    
+    // Maske oluştur (seçilen alanın renk histogramını al)
+    let roi = hsv.roi(new cv.Rect(trackWindow.x, trackWindow.y, trackWindow.width, trackWindow.height));
+    roiHist = new cv.Mat();
+    let mask = new cv.Mat();
+    let channels = [0]; // Hue kanalı
+    let histSize = [180];
+    let ranges = [0, 180];
+    
+    cv.calcHist([roi], channels, mask, roiHist, histSize, ranges);
+    cv.normalize(roiHist, roiHist, 0, 255, cv.NORM_MINMAX);
+    
+    roi.delete(); mask.delete(); src.delete();
+    
+    termCrit = new cv.TermCriteria(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 10, 1);
+    
+    currentMode = 'tracking';
+    document.getElementById('modeStatus').innerText = "Mod: Takip Ediliyor...";
+    video.play();
+    isPlaying = true;
+    requestAnimationFrame(processVideo);
+}
+
+// 3. Manuel Takip
+document.getElementById('btnManualTrack').addEventListener('click', () => {
+    if(pxPerMeter === 0) { alert("Önce kalibrasyon yapın!"); return; }
+    currentMode = 'manual';
+    document.getElementById('modeStatus').innerText = "Mod: Manuel (Her frame'de objeye tıkla)";
+    video.pause();
+    framesData = []; // Verileri sıfırla
+});
+
+// Ana Döngü
+function processVideo() {
+    if (!isPlaying && currentMode !== 'tracking') return;
+    
+    if (video.paused || video.ended) {
+        isPlaying = false;
+        return;
+    }
+
+    drawFrame(); // Videoyu canvas'a bas
+
+    if (currentMode === 'tracking') {
+        let src = cv.imread(canvas);
+        let hsvCanvas = new cv.Mat();
+        cv.cvtColor(src, hsvCanvas, cv.COLOR_RGBA2RGB);
+        cv.cvtColor(hsvCanvas, hsvCanvas, cv.COLOR_RGB2HSV);
+        
+        dst = new cv.Mat();
+        let channels = [0];
+        let ranges = [0, 180];
+        
+        // CamShift için BackProjection
+        cv.calcBackProject([hsvCanvas], channels, roiHist, dst, ranges, 1);
+        
+        // CamShift uygula
+        let [rotatedRect, trackBox] = cv.CamShift(dst, trackWindow, termCrit);
+        
+        // Kutuyu güncelle
+        trackWindow.x = trackBox.x;
+        trackWindow.y = trackBox.y;
+        trackWindow.width = trackBox.width;
+        trackWindow.height = trackBox.height;
+
+        // Ekrana çiz
+        let pts = cv.rotatedRectPoints(rotatedRect);
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        ctx.lineTo(pts[1].x, pts[1].y);
+        ctx.lineTo(pts[2].x, pts[2].y);
+        ctx.lineTo(pts[3].x, pts[3].y);
+        ctx.closePath();
+        ctx.stroke();
+
+        // Merkez noktası
+        let centerX = trackWindow.x + trackWindow.width / 2;
+        let centerY = trackWindow.y + trackWindow.height / 2;
+        
+        processPhysics(centerX, centerY, video.currentTime);
+
+        src.delete(); hsvCanvas.delete(); dst.delete();
+        requestAnimationFrame(processVideo);
     }
     
-    lastPos = {x:curX, y:curY};
-    lastTime = video.currentTime;
-
-    // Görsel
-    ctx.strokeStyle="#00cec9"; ctx.lineWidth=3;
-    ctx.beginPath(); ctx.arc(curX, curY, 25, 0, Math.PI*2); ctx.stroke();
-  } else {
-    // Kaybolursa pencereyi çiz (debug)
-    ctx.strokeStyle="red"; ctx.strokeRect(lastPos.x-50, lastPos.y-50, 100, 100);
-  }
-
-  requestAnimationFrame(loop);
+    // Seek bar güncelle
+    document.getElementById('videoSeek').value = (video.currentTime / video.duration) * 100;
 }
 
-// -- YARDIMCI --
-function isMatch(h){
-  let hd = Math.abs(h.h - targetHSV.h);
-  if(hd > 180) hd = 360 - hd;
-  // Düşük tolerans (sandalye kırmızı/turuncu karışmasın diye)
-  return hd < 20 && h.s > 40 && h.v > 40;
+function drawFrame() {
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 }
 
-function rgbToHsv(r,g,b){
-  r/=255; g/=255; b/=255;
-  let max=Math.max(r,g,b), min=Math.min(r,g,b);
-  let h,s,v=max, d=max-min;
-  s=max==0?0:d/max;
-  if(max==min)h=0;
-  else{
-    switch(max){
-      case r:h=(g-b)/d+(g<b?6:0);break;
-      case g:h=(b-r)/d+2;break;
-      case b:h=(r-g)/d+4;break;
+// Fizik Motoru
+function processPhysics(x, y, time) {
+    // Veri ekle
+    framesData.push({ t: time, x: x, y: y });
+    
+    if (framesData.length < 2) return;
+
+    let prev = framesData[framesData.length - 2];
+    let curr = framesData[framesData.length - 1];
+    
+    let dt = curr.t - prev.t;
+    if (dt <= 0) return;
+
+    // Piksel mesafesi
+    let dX_px = Math.abs(curr.x - prev.x);
+    let dY_px = Math.abs(curr.y - prev.y); // Y aşağı doğru artar
+    let dist_px = Math.sqrt(dX_px*dX_px + dY_px*dY_px);
+
+    // Metrik Dönüşüm
+    let speed = (dist_px / pxPerMeter) / dt; // m/s
+    
+    // Ekrana yaz
+    document.getElementById('valSpeed').innerText = speed.toFixed(2);
+
+    // İvme Hesaplama (Son 3 nokta varsa)
+    if (framesData.length > 2) {
+        let prev2 = framesData[framesData.length - 3];
+        let v1 = (Math.sqrt(Math.pow(prev.x - prev2.x, 2) + Math.pow(prev.y - prev2.y, 2)) / pxPerMeter) / (prev.t - prev2.t);
+        let accel = (speed - v1) / dt;
+        document.getElementById('valAccel').innerText = accel.toFixed(2);
+
+        // Dikey İvme (Yerçekimi / Magnus Analizi)
+        // Y ekseni hızı (aşağı +, yukarı -)
+        let vy_curr = ((curr.y - prev.y) / pxPerMeter) / dt;
+        let vy_prev = ((prev.y - prev2.y) / pxPerMeter) / (prev.t - prev2.t);
+        
+        let ay = (vy_curr - vy_prev) / dt; 
+        
+        // Gerçek dünyada yerçekimi aşağı doğru pozitiftir (ekran koordinatlarında)
+        // Eğer ay, 9.81'den küçükse cisim "tutunuyor" demektir (Lift/Magnus).
+        // Eğer çok büyükse aşağı çakılıyordur (Top spin).
+        document.getElementById('valGravity').innerText = Math.abs(ay).toFixed(2);
     }
-    h/=6;
-  }
-  return {h:h*360, s:s*100, v:v*100};
 }
 
-function reset(){
-  stopRun();
-  mode="IDLE"; lastPos=null; speeds=[];
-  updateButtons();
-  info.innerHTML = "Sıfırlandı.";
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-}
+document.getElementById('btnReset').addEventListener('click', () => {
+    framesData = [];
+    currentMode = 'idle';
+    document.getElementById('modeStatus').innerText = "Sıfırlandı";
+    drawFrame();
+});
 
-function updateButtons(){
-  document.getElementById("bCalib").className = mode==="CALIB"?"active":"";
-  document.getElementById("bSel").className = mode==="SELECT"?"active":"";
-  document.getElementById("bRun").innerText = running ? "DURDUR" : "3. BAŞLAT";
-}
 </script>
 </body>
 </html>
